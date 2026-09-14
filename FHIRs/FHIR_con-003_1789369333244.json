@@ -1,0 +1,47 @@
+{
+  "resourceType": "Composition",
+  "id": "comp-con-003",
+  "status": "final",
+  "type": {
+    "coding": [
+      {
+        "system": "http://loinc.org",
+        "code": "11488-4",
+        "display": "Consult note"
+      }
+    ]
+  },
+  "date": "2026-09-14T07:02:12.841Z",
+  "title": "Clinical Encounter Note",
+  "section": [
+    {
+      "title": "Subjective",
+      "text": {
+        "status": "generated",
+        "div": "<div>Patient presents with 3-day history of severe sore throat, fever, fatigue, and bilateral cervical lymphadenopathy. Reports mild headache and nasal congestion. No significant cough.</div>"
+      }
+    },
+    {
+      "title": "Objective",
+      "text": {
+        "status": "generated",
+        "div": "<div>Temperature: 38.6°C. Throat: markedly erythematous with tonsillar exudate bilaterally. Lymph nodes: bilateral cervical lymphadenopathy palpable. Rapid strep antigen test: POSITIVE.</div>"
+      }
+    },
+    {
+      "title": "Assessment",
+      "text": {
+        "status": "generated",
+        "div": "<div>Streptococcal pharyngitis (Group A Streptococcus). Acute bacterial tonsillitis.</div>"
+      }
+    },
+    {
+      "title": "Plan",
+      "text": {
+        "status": "generated",
+        "div": "<div>1. Prescribe Amoxicillin 500 mg TID × 10 days.\n2. Rest and adequate hydration.\n3. Ibuprofen 400 mg PRN or Paracetamol 500 mg PRN for fever and pain.\n4. Return if symptoms worsen or fail to improve within 48–72 hours.</div>"
+      }
+    }
+  ],
+  "_mock": true
+}
