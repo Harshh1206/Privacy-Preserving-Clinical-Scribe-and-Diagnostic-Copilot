@@ -1,0 +1,63 @@
+{
+  "resourceType": "Composition",
+  "id": "comp-con-001",
+  "status": "preliminary",
+  "type": {
+    "coding": [
+      {
+        "system": "http://loinc.org",
+        "code": "11488-4",
+        "display": "Consult note"
+      }
+    ]
+  },
+  "date": "2026-09-16T05:20:02.820231Z",
+  "title": "Clinical Encounter Note",
+  "subject": {
+    "reference": "Patient/pt-001",
+    "display": "Eleanor Hartman"
+  },
+  "author": [
+    {
+      "display": "Dr. Sarah Chen"
+    }
+  ],
+  "section": [
+    {
+      "title": "Subjective",
+      "text": {
+        "status": "generated",
+        "div": "<div>Patient reports occasional morning headaches since last visit. She denies dizziness, chest pain, or shortness of breath. Medication adherence confirmed \u2014 Lisinopril 10 mg daily and Atorvastatin 40 mg nightly. Patient attributes symptoms to increased work-related stress. Live browser edit.</div>"
+      }
+    },
+    {
+      "title": "Objective",
+      "text": {
+        "status": "generated",
+        "div": "<div>BP: 148/92 mmHg (elevated). Weight: 68 kg (stable). HR: 74 bpm, regular. Respiratory rate: 14/min. No peripheral oedema. Auscultation: clear lung fields bilaterally.</div>"
+      }
+    },
+    {
+      "title": "Assessment",
+      "text": {
+        "status": "generated",
+        "div": "<div>Essential hypertension \u2014 suboptimally controlled. Likely exacerbated by psychosocial stressors. Hyperlipidaemia \u2014 stable on current therapy.</div>"
+      }
+    },
+    {
+      "title": "Plan",
+      "text": {
+        "status": "generated",
+        "div": "<div>1. Increase Lisinopril to 20 mg daily for improved BP control.<br/>2. Monitor for ACE inhibitor-related dry cough; switch to ARB if symptomatic.<br/>3. Order basic metabolic panel (BMP) \u2014 check renal function and electrolytes prior to next visit.<br/>4. Home BP monitoring daily \u2014 log and bring to follow-up.<br/>5. Follow-up appointment in 6 weeks.<br/>6. Counsel patient on stress management and lifestyle modification.</div>"
+      }
+    },
+    {
+      "title": "AI Grounding Report",
+      "text": {
+        "status": "generated",
+        "div": "<div>Grounding score: 40/100. Hallucination risk: high. Supported 8, unsupported 12, conflicts 0.<p><b>supported</b> [subjective] Patient reports occasional morning headaches since last visit.</p><p><b>unsupported</b> [subjective] She denies dizziness, chest pain, or shortness of breath.</p><p><b>unsupported</b> [subjective] Medication adherence confirmed \u2014 Lisinopril 10 mg daily and Atorvastatin 40 mg nightly.</p><p><b>unsupported</b> [subjective] Patient attributes symptoms to increased work-related stress.</p><p><b>unsupported</b> [subjective] Live browser edit.</p><p><b>supported</b> [objective] BP: 148/92 mmHg (elevated).</p><p><b>supported</b> [objective] Weight: 68 kg (stable).</p><p><b>unsupported</b> [objective] HR: 74 bpm, regular.</p><p><b>unsupported</b> [objective] Respiratory rate: 14/min.</p><p><b>unsupported</b> [objective] No peripheral oedema.</p><p><b>unsupported</b> [objective] Auscultation: clear lung fields bilaterally.</p><p><b>unsupported</b> [assessment] Essential hypertension \u2014 suboptimally controlled.</p><p><b>unsupported</b> [assessment] Likely exacerbated by psychosocial stressors.</p><p><b>unsupported</b> [assessment] Hyperlipidaemia \u2014 stable on current therapy.</p><p><b>supported</b> [plan] Increase Lisinopril to 20 mg daily for improved BP control.</p><p><b>supported</b> [plan] Monitor for ACE inhibitor-related dry cough; switch to ARB if symptomatic.</p><p><b>supported</b> [plan] Order basic metabolic panel (BMP) \u2014 check renal function and electrolytes prior to next visit.</p><p><b>supported</b> [plan] Home BP monitoring daily \u2014 log and bring to follow-up.</p><p><b>supported</b> [plan] Follow-up appointment in 6 weeks.</p><p><b>unsupported</b> [plan] Counsel patient on stress management and lifestyle modification.</p></div>"
+      }
+    }
+  ],
+  "_mock": true
+}

@@ -33,6 +33,7 @@ function IconWarn() {
 export default function FinalizeDialog({ isOpen, onClose, onConfirm, validation, patientName }: FinalizeDialogProps) {
   const [isConfirming, setIsConfirming] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -41,10 +42,14 @@ export default function FinalizeDialog({ isOpen, onClose, onConfirm, validation,
   const isStale = validation?.isStale ?? false;
 
   async function handleConfirm() {
+    if (isStale) return;
     setIsConfirming(true);
+    setError(null);
     try {
       await onConfirm();
       setConfirmed(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setIsConfirming(false);
     }
@@ -109,7 +114,7 @@ export default function FinalizeDialog({ isOpen, onClose, onConfirm, validation,
               {isStale && (
                 <div className="flex items-start gap-2 text-warn-300 text-xs bg-warn-500/10 rounded px-2 py-2">
                   <IconWarn />
-                  <span>Validation is stale. Consider revalidating before finalizing.</span>
+                  <span>Validation is stale. Revalidate before finalizing — the note cannot be locked on a stale score.</span>
                 </div>
               )}
               {hasConflicts && (
@@ -127,6 +132,7 @@ export default function FinalizeDialog({ isOpen, onClose, onConfirm, validation,
               <p className="text-xs text-slate-500">
                 Finalizing locks this note to the audit trail. The note will become read-only and cannot be edited after this action.
               </p>
+              {error && <p className="text-xs text-danger-400">{error}</p>}
             </div>
 
             {/* Actions */}
@@ -137,9 +143,9 @@ export default function FinalizeDialog({ isOpen, onClose, onConfirm, validation,
               <button
                 className={hasConflicts || isStale ? 'btn-danger' : 'btn-primary'}
                 onClick={handleConfirm}
-                disabled={isConfirming}
+                disabled={isConfirming || isStale || !validation}
               >
-                {isConfirming ? 'Finalizing…' : 'Finalize Note'}
+                {isConfirming ? 'Finalizing…' : isStale ? 'Revalidate required' : 'Finalize Note'}
               </button>
             </div>
           </>

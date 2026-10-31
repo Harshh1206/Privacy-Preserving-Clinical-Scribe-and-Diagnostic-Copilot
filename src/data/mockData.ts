@@ -70,7 +70,8 @@ export const MOCK_CONSULTATIONS: Consultation[] = [
     validationId: 'val-001',
     createdAt: '2026-09-14T09:00:00Z',
     updatedAt: '2026-09-14T09:25:00Z',
-  },
+     safetyStatus: 'CLEAR',
+     },
   {
     id: 'con-002',
     patientId: 'pt-002',
@@ -85,7 +86,8 @@ export const MOCK_CONSULTATIONS: Consultation[] = [
     validationId: 'val-002',
     createdAt: '2026-09-14T10:15:00Z',
     updatedAt: '2026-09-14T10:45:00Z',
-  },
+    safetyStatus: 'CLEAR',
+    },
   {
     id: 'con-003',
     patientId: 'pt-003',
@@ -100,7 +102,8 @@ export const MOCK_CONSULTATIONS: Consultation[] = [
     validationId: 'val-003',
     createdAt: '2026-09-14T11:30:00Z',
     updatedAt: '2026-09-14T11:50:00Z',
-  },
+    safetyStatus: 'CLEAR',
+    },
   {
     id: 'con-004',
     patientId: 'pt-001',
@@ -116,7 +119,8 @@ export const MOCK_CONSULTATIONS: Consultation[] = [
     finalisedAt: '2026-07-10T09:40:00Z',
     createdAt: '2026-07-10T09:00:00Z',
     updatedAt: '2026-07-10T09:40:00Z',
-  },
+    safetyStatus: 'CLEAR',
+    },
 ];
 
 // ─── Scenario A: Eleanor Hartman — Hypertension follow-up (HIGH GROUNDING) ──
@@ -469,3 +473,22 @@ export const VALIDATIONS: Record<string, ValidationResult> = {
   'val-003': MOCK_VALIDATION_003,
   'val-004': MOCK_VALIDATION_004,
 };
+
+export const MOCK_TEAM_B_RESPONSE = {
+  patient_info: { demographics: {}, allergies: ['Penicillin'], medications: [] },
+  soap_note: {
+    subjective: 'Sore throat and fever for 3 days.',
+    objective: 'Temperature: 101.2°F. Throat inflammation.',
+    assessment: 'Likely streptococcal pharyngitis.',
+    plan: 'Prescription requires safety review.',
+  },
+  conflicts: [{
+    type: 'MEDICATION_ALLERGY',
+    allergy: 'Penicillin',
+    medication: 'Amoxicillin',
+    severity: 'HIGH',
+    status: 'BLOCKED',
+    message: 'Medication conflicts with documented allergy.',
+  }],
+  safety_status: 'CONFLICT_DETECTED',
+} as const;

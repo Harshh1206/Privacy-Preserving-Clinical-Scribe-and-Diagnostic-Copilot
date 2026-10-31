@@ -261,6 +261,10 @@ export default function ConsultationWorkspace() {
           {getStatusLabel(consultation.status)}
         </span>
 
+        {consultation.safetyStatus === 'CONFLICT_DETECTED' && (
+          <span className="badge badge-danger">Safety conflict detected</span>
+        )}
+
         {isStale && !finalized && (
           <span className="badge badge-warn">Validation stale</span>
         )}

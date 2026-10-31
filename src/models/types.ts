@@ -6,6 +6,7 @@ export type ClaimStatus = 'supported' | 'unsupported' | 'conflict' | 'pending';
 export type Severity = 'low' | 'medium' | 'high' | 'critical';
 export type HallucinationRisk = 'low' | 'moderate' | 'high';
 export type ExportFormat = 'pdf' | 'fhir' | 'ehr';
+export type SafetyStatus = 'CLEAR' | 'CONFLICT_DETECTED';
 
 // ─── Patient ─────────────────────────────────────────────────────────────────
 
@@ -42,6 +43,7 @@ export interface Consultation {
   finalisedAt?: string;  // ISO datetime
   createdAt: string;
   updatedAt: string;
+  safetyStatus: SafetyStatus;
 }
 
 // ─── Transcript ───────────────────────────────────────────────────────────────
@@ -90,6 +92,56 @@ export interface SOAPNote {
   finalizedAt?: string;
   finalizedBy?: string;
   version: number;
+}
+
+export interface TeamBConflict {
+  type: string;
+  allergy: string;
+  medication: string;
+  severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  status: 'BLOCKED' | 'REVIEW';
+  message: string;
+}
+
+export interface TeamBApiResponse {
+  patient_info: {
+    demographics: Record<string, unknown>;
+    allergies: string[];
+    medications: string[];
+  };
+  soap_note: {
+    subjective: string;
+    objective: string;
+    assessment: string;
+    plan: string;
+  };
+  conflicts: TeamBConflict[];
+  safety_status: SafetyStatus;
+}
+
+export interface TeamBResponse {
+  patientInfo: {
+    demographics: Record<string, unknown>;
+    allergies: string[];
+    medications: string[];
+  };
+  soapNote: {
+    subjective: string;
+    objective: string;
+    assessment: string;
+    plan: string;
+  };
+  conflicts: TeamBConflict[];
+  safetyStatus: SafetyStatus;
+}
+
+export function mapTeamBResponse(payload: TeamBApiResponse): TeamBResponse {
+  return {
+    patientInfo: payload.patient_info,
+    soapNote: payload.soap_note,
+    conflicts: payload.conflicts,
+    safetyStatus: payload.safety_status,
+  };
 }
 
 // ─── Medical Entity ───────────────────────────────────────────────────────────
