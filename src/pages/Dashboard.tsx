@@ -79,8 +79,16 @@ export default function Dashboard() {
       <div className="max-w-5xl mx-auto px-6 py-5">
         {/* Header */}
         <div className="mb-5">
-          <h1 className="text-lg font-semibold text-slate-100">Today's Overview</h1>
-          <p className="text-sm text-slate-500 mt-0.5">{today} · Dr. Sarah Chen · Internal Medicine</p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-lg font-semibold text-slate-100">Today's Overview</h1>
+              <p className="text-sm text-slate-500 mt-0.5">{today} · Dr. Sarah Chen · Internal Medicine</p>
+            </div>
+            <Link to="/record" className="btn-primary">
+              <span aria-hidden="true">●</span>
+              Record Consultation
+            </Link>
+          </div>
         </div>
 
         {/* Stats row */}

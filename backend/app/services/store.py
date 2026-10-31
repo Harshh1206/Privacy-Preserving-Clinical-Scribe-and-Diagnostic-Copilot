@@ -12,6 +12,8 @@ from app.data import seed
 from app.database import SessionLocal
 from app.database_models import (
     AuditEntry as DBAuditEntry,
+    ClinicalRecord as DBClinicalRecord,
+    utc_now,
     EvidenceRecord,
     MedicalEntity as DBMedicalEntity,
     Patient as DBPatient,
@@ -26,6 +28,7 @@ from app.database_models import (
 from app.models.schemas import (
     AuditEntry,
     Claim,
+    ClinicalRecord,
     Consultation,
     Evidence,
     MedicalEntity,
@@ -393,6 +396,38 @@ class Store:
         return row
 
     def _patient(self, row: DBPatient) -> Patient:
+        records: list[ClinicalRecord] = []
+        seen_records: set[tuple[str, str, str, str, str]] = set()
+        for record in sorted(
+            getattr(row, "clinical_records", []) or [],
+            key=lambda item: item.updated_at,
+            reverse=True,
+        ):
+            key = (
+                record.category,
+                record.name_normalized,
+                record.value or "",
+                record.unit or "",
+                record.source or "",
+            )
+            if key in seen_records:
+                continue
+            seen_records.add(key)
+            records.append(ClinicalRecord.model_validate({
+                "id": record.id,
+                "patientId": record.patient_id,
+                "consultationId": record.consultation_id,
+                "category": record.category,
+                "name": record.name,
+                "value": record.value,
+                "unit": record.unit,
+                "source": record.source,
+                "reaction": record.reaction,
+                "status": record.status,
+                "verification": record.verification,
+                "recordedAt": record.recorded_at,
+                "updatedAt": record.updated_at.isoformat() if record.updated_at else now_iso(),
+            }))
         return Patient.model_validate({
             "id": row.id, "mrn": row.mrn, "firstName": row.first_name,
             "lastName": row.last_name, "dob": row.dob, "sex": row.sex,
@@ -400,6 +435,7 @@ class Store:
             "conditions": row.conditions or [], "medications": row.medications or [],
             "lastVisit": row.last_visit, "consultationCount": row.consultation_count,
             "privacyLevel": row.privacy_level,
+            "clinicalRecords": [record.model_dump(mode="json", by_alias=True) for record in records],
         })
 
     def _consultation(self, row: DBConsultation) -> Consultation:
@@ -933,6 +969,202 @@ class Store:
                     detail=f"SOAP note edited. Version bumped to v{row.version}. Previous validation marked stale.",
                     soap_version=row.version,
                 ))
+            db.commit()
+            db.refresh(row)
+            return self._soap(row)
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            self._close(db)
+
+    @staticmethod
+    def _normalize_clinical_name(name: str) -> str:
+        return " ".join(name.strip().lower().replace("_", " ").split())
+
+    @staticmethod
+    def _merge_unique(items: list[str], additions: list[str]) -> list[str]:
+        merged = list(items or [])
+        indexes = {Store._normalize_clinical_name(item.split(" — ")[0]): index for index, item in enumerate(merged)}
+        for addition in additions:
+            key = Store._normalize_clinical_name(addition.split(" — ")[0])
+            if key not in indexes:
+                indexes[key] = len(merged)
+                merged.append(addition)
+        return merged
+
+    def _persist_clinical_data(
+        self,
+        db: Session,
+        patient: DBPatient,
+        consultation: DBConsultation,
+        generated: object,
+    ) -> None:
+        clinical_data = getattr(generated, "clinical_data", None)
+        if clinical_data is None:
+            return
+
+        new_conditions: list[str] = []
+        new_medications: list[str] = []
+        new_allergies: list[str] = []
+
+        for condition in clinical_data.conditions:
+            verification = condition.verification or "reported"
+            status = condition.status or "reported"
+            label = condition.name.strip()
+            if verification == "confirmed" and status == "active":
+                display = label
+            else:
+                display = f"{label} — {status}, {verification.replace('_', ' ')}"
+            new_conditions.append(display)
+            self._upsert_clinical_record(
+                db, patient, consultation, category="condition", name=label,
+                status=status, verification=verification,
+            )
+
+        for medication in clinical_data.medications:
+            verification = medication.verification or "reported"
+            status = medication.status or "reported_current"
+            parts = [medication.name.strip()]
+            if medication.dose:
+                parts.append(medication.dose.strip())
+            if medication.frequency:
+                parts.append(medication.frequency.strip())
+            label = " ".join(parts)
+            display = f"{label} — {status.replace('_', ' ')}, {verification.replace('_', ' ')}"
+            new_medications.append(display)
+            self._upsert_clinical_record(
+                db, patient, consultation, category="medication", name=label,
+                status=status, verification=verification,
+            )
+
+        for measurement in clinical_data.measurements:
+            source = measurement.source or "unknown"
+            verification = measurement.verification or "reported"
+            self._upsert_clinical_record(
+                db, patient, consultation, category="measurement",
+                name=measurement.name.strip(), value=measurement.value,
+                unit=measurement.unit, source=source,
+                verification=verification, recorded_at=measurement.recorded_at,
+            )
+
+        for allergy in clinical_data.allergies:
+            verification = allergy.verification or "reported"
+            label = allergy.substance.strip()
+            if allergy.reaction:
+                display = f"{label} — {allergy.reaction.strip()} ({verification.replace('_', ' ')})"
+            else:
+                display = f"{label} — reaction not documented ({verification.replace('_', ' ')})"
+            new_allergies.append(display)
+            self._upsert_clinical_record(
+                db, patient, consultation, category="allergy", name=label,
+                reaction=allergy.reaction, verification=verification,
+            )
+
+        patient.conditions = self._merge_unique(patient.conditions or [], new_conditions)
+        patient.medications = self._merge_unique(patient.medications or [], new_medications)
+        patient.allergies = self._merge_unique(patient.allergies or [], new_allergies)
+        patient.updated_at = utc_now()
+
+    def _upsert_clinical_record(
+        self,
+        db: Session,
+        patient: DBPatient,
+        consultation: DBConsultation,
+        *,
+        category: str,
+        name: str,
+        value: str | None = None,
+        unit: str | None = None,
+        source: str | None = None,
+        reaction: str | None = None,
+        status: str | None = None,
+        verification: str = "reported",
+        recorded_at: str | None = None,
+    ) -> None:
+        name_normalized = self._normalize_clinical_name(name)
+        if not name_normalized:
+            return
+        existing = db.scalar(
+            select(DBClinicalRecord).where(
+                DBClinicalRecord.patient_id == patient.id,
+                DBClinicalRecord.consultation_id == consultation.id,
+                DBClinicalRecord.category == category,
+                DBClinicalRecord.name_normalized == name_normalized,
+                DBClinicalRecord.value == value,
+                DBClinicalRecord.unit == unit,
+                DBClinicalRecord.source == source,
+            )
+        )
+        if existing is None:
+            db.add(DBClinicalRecord(
+                id=f"cr-{uuid.uuid4()}",
+                patient_id=patient.id,
+                consultation_id=consultation.id,
+                category=category,
+                name=name,
+                name_normalized=name_normalized,
+                value=value,
+                unit=unit,
+                source=source,
+                reaction=reaction,
+                status=status,
+                verification=verification,
+                recorded_at=recorded_at or consultation.date,
+            ))
+        else:
+            existing.name = name
+            existing.reaction = reaction
+            existing.status = status
+            existing.verification = verification
+            existing.recorded_at = recorded_at or existing.recorded_at or consultation.date
+
+    def generate_soap(
+        self,
+        consultation_id: str,
+        soap_note_id: str,
+        generated: object,
+    ) -> SOAPNote:
+        db = self._session()
+        try:
+            consultation = db.get(DBConsultation, consultation_id)
+            if consultation is None:
+                raise not_found("Consultation", consultation_id)
+            row = db.get(DBSOAPNote, soap_note_id)
+            if row is None or row.consultation_id != consultation_id:
+                raise not_found("SOAP note", soap_note_id)
+            if row.is_finalized:
+                raise conflict("Cannot regenerate a finalized SOAP note")
+
+            ts = now_iso()
+            patient = db.get(DBPatient, consultation.patient_id)
+            if patient is None:
+                raise not_found("Patient", consultation.patient_id)
+            self._persist_clinical_data(db, patient, consultation, generated)
+            for key in ("subjective", "objective", "assessment", "plan"):
+                text = getattr(generated, key)
+                setattr(row, key, {
+                    "text": text,
+                    "lastEditedAt": ts,
+                    "lastEditedBy": "System (AI Scribe)",
+                })
+            row.version += 1
+            row.updated_at = ts
+            consultation.status = "pending-review"
+            consultation.updated_at = ts
+            if consultation.validation_id:
+                validation = db.get(DBValidationResult, consultation.validation_id)
+                if validation:
+                    validation.is_stale = True
+            db.add(DBAuditEntry(
+                id=f"au-{uuid.uuid4().hex[:10]}",
+                consultation_id=consultation_id,
+                timestamp=ts,
+                action="generated",
+                actor="System (AI Scribe)",
+                detail=f"Detailed SOAP note generated strictly from transcript. Version bumped to v{row.version}.",
+                soap_version=row.version,
+            ))
             db.commit()
             db.refresh(row)
             return self._soap(row)

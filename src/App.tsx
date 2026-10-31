@@ -5,6 +5,7 @@ import Patients from './pages/Patients';
 import PatientProfile from './pages/PatientProfile';
 import ConsultationWorkspace from './pages/ConsultationWorkspace';
 import Records from './pages/Records';
+import RecordConsultation from './pages/RecordConsultation';
 
 export default function App() {
   return (
@@ -17,6 +18,8 @@ export default function App() {
             <Route path="/patients" element={<Patients />} />
             <Route path="/patients/:patientId" element={<PatientProfile />} />
             <Route path="/consultation/:consultationId" element={<ConsultationWorkspace />} />
+            <Route path="/record" element={<RecordConsultation />} />
+            <Route path="/record/:patientId" element={<RecordConsultation />} />
             <Route path="/records" element={<Records />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

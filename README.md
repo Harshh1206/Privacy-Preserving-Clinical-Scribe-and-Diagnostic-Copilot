@@ -292,6 +292,26 @@ Open your browser and navigate to:
 http://localhost:5173
 ```
 
+### Team A hosted transcription backend
+
+```bash
+cd backend
+python -m pip install -r requirements.txt
+cp .env.example .env
+# Set DATABASE_URL to the local PostgreSQL database password in backend/.env
+python -m alembic upgrade head
+python -m uvicorn app.main:app --reload --port 8000
+```
+
+Team A uses the hosted Groq speech-to-text API with
+`whisper-large-v3-turbo`. Set `GROQ_API_KEY` in `backend/.env`; it is read only by the
+backend and never exposed to the frontend. Audio is uploaded to Groq only from synthetic
+test recordings or explicitly authorized workflows. Temporary local files are removed
+after transcription. Uploads use:
+
+- `POST /api/team-a/transcriptions/{consultationId}`
+- `GET /api/team-a/transcriptions/{consultationId}`
+
 ---
 
 ## 🔒 Compliance & Privacy Design

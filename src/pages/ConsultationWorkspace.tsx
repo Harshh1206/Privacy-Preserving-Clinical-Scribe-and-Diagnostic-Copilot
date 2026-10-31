@@ -1,10 +1,12 @@
 import { useEffect, useState, useCallback } from 'react';
+import type { ChangeEvent } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import type { Consultation, Patient, Transcript, SOAPNote, ValidationResult, Claim, Evidence, AuditEntry } from '../models/types';
 import {
   getConsultation, getPatient, getTranscript, getSOAPNote,
   getValidation, updateSOAPNote, validateConsultation,
-  finalizeConsultation, getAuditTrail
+  finalizeConsultation, getAuditTrail, uploadTeamAAudio, getTeamATranscriptionStatus,
+  mapTeamASpeaker, generateSOAPNote
 } from '../services/api';
 import { formatDateTime, getStatusBadgeClass, getStatusLabel, calcAge } from '../utils/format';
 
@@ -75,6 +77,7 @@ function IconAllergy() {
 function AuditTrail({ entries }: { entries: AuditEntry[] }) {
   const ACTION_COLORS: Record<string, string> = {
     created: 'text-slate-400',
+    generated: 'text-brand-400',
     edited: 'text-brand-400',
     validated: 'text-ok-400',
     revalidated: 'text-ok-400',
@@ -119,6 +122,10 @@ export default function ConsultationWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isGeneratingSOAP, setIsGeneratingSOAP] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [soapError, setSoapError] = useState<string | null>(null);
 
   const [selectedClaim, setSelectedClaim] = useState<Claim | null>(null);
   const [selectedEvidence, setSelectedEvidence] = useState<Evidence[]>([]);
@@ -157,20 +164,115 @@ export default function ConsultationWorkspace() {
       .finally(() => setLoading(false));
   }, [consultationId]);
 
+  async function handleAudioUpload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file || !consultationId) return;
+    const allowedExtensions = /\.(wav|mp3|m4a|flac|ogg|webm)$/i;
+    if (!allowedExtensions.test(file.name)) {
+      setUploadError('Unsupported audio format. Use WAV, MP3, M4A, FLAC, OGG, or WebM.');
+      event.target.value = '';
+      return;
+    }
+    if (file.size === 0) {
+      setUploadError('The selected audio file is empty.');
+      event.target.value = '';
+      return;
+    }
+    if (file.size > 25 * 1024 * 1024) {
+      setUploadError('Audio exceeds the 25 MB upload limit.');
+      event.target.value = '';
+      return;
+    }
+    setIsUploading(true);
+    setUploadError(null);
+    try {
+      const status = await uploadTeamAAudio(consultationId, file);
+      setTranscript(status);
+    } catch (e) {
+      setUploadError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setIsUploading(false);
+      event.target.value = '';
+    }
+  }
+
+  async function handleSpeakerMap(
+    speakerId: string,
+    speakerRole: 'doctor' | 'patient' | 'unknown',
+    speakerDisplayName: string,
+  ) {
+    if (!consultationId) return;
+    try {
+      const updated = await mapTeamASpeaker(
+        consultationId,
+        speakerId,
+        speakerRole,
+        speakerDisplayName,
+      );
+      setTranscript(updated);
+    } catch (e) {
+      setUploadError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  useEffect(() => {
+    if (!consultationId) return;
+    const status = transcript?.processingStatus;
+    if (status !== 'processing' && status !== 'pending') return;
+
+    const timer = window.setInterval(async () => {
+      try {
+        const current = await getTeamATranscriptionStatus(consultationId);
+        if (!current) return;
+        setTranscript(current);
+        if (current.processingStatus === 'completed') {
+          window.clearInterval(timer);
+        } else if (current.processingStatus === 'failed') {
+          window.clearInterval(timer);
+          setUploadError(current.processingError || 'Audio transcription failed.');
+        }
+      } catch (e) {
+        setUploadError(e instanceof Error ? e.message : String(e));
+        window.clearInterval(timer);
+      }
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [consultationId, transcript?.processingStatus]);
+
   // Save SOAP
   const handleSave = useCallback(async (
     patch: Partial<Pick<SOAPNote, 'subjective' | 'objective' | 'assessment' | 'plan'>>
   ) => {
     if (!soapNote) return;
     setIsSaving(true);
+    setSoapError(null);
     try {
       const updated = await updateSOAPNote(soapNote.id, patch);
       setSoapNote(updated);
       setValidation(prev => prev ? { ...prev, isStale: true } : prev);
+    } catch (e) {
+      setSoapError(e instanceof Error ? e.message : String(e));
     } finally {
       setIsSaving(false);
     }
   }, [soapNote]);
+
+  async function handleGenerateSOAP() {
+    if (!consultationId) return;
+    setIsGeneratingSOAP(true);
+    setSoapError(null);
+    try {
+      const generated = await generateSOAPNote(consultationId);
+      setSoapNote(generated);
+      setValidation(prev => prev ? { ...prev, isStale: true } : prev);
+      const audit = await getAuditTrail(consultationId);
+      setAuditTrail(audit);
+    } catch (e) {
+      setSoapError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setIsGeneratingSOAP(false);
+    }
+  }
 
   // Revalidate
   async function handleRevalidate() {
@@ -232,6 +334,10 @@ export default function ConsultationWorkspace() {
 
   const finalized = soapNote?.isFinalized ?? false;
   const isStale = validation?.isStale ?? false;
+  const soapIsEmpty = soapNote
+    ? [soapNote.subjective.text, soapNote.objective.text, soapNote.assessment.text, soapNote.plan.text]
+        .every(text => !text.trim())
+    : false;
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
@@ -331,15 +437,39 @@ export default function ConsultationWorkspace() {
         <div className="w-[30%] min-w-[280px] flex flex-col border-r border-slate-800 overflow-hidden">
           <div className="panel-header shrink-0">
             <span className="panel-title">Transcript</span>
-            <span className="text-2xs text-slate-600">
-              {transcript?.entries.length ?? 0} entries · Team A
-            </span>
+            <div className="flex items-center gap-2">
+              <span className={`text-2xs ${
+                transcript?.processingStatus === 'failed' ? 'text-red-400' :
+                transcript?.processingStatus === 'processing' || transcript?.processingStatus === 'pending' ? 'text-brand-400' :
+                'text-slate-600'
+              }`}>
+                {transcript?.processingStatus === 'processing' || transcript?.processingStatus === 'pending' ? 'Transcribing…' :
+                 transcript?.processingStatus === 'failed' ? 'Transcription failed' :
+                 `${transcript?.entries.length ?? 0} entries · Team A`}
+              </span>
+              <label className="text-2xs px-2 py-1 rounded border border-slate-700 text-slate-300 cursor-pointer hover:bg-slate-800">
+                {isUploading ? 'Uploading…' : 'Upload audio'}
+                <input
+                  type="file"
+                  accept=".wav,.mp3,.m4a,.flac,.ogg,.webm,audio/*"
+                  className="hidden"
+                  disabled={isUploading || transcript?.processingStatus === 'processing'}
+                  onChange={handleAudioUpload}
+                />
+              </label>
+            </div>
           </div>
+          {uploadError && (
+            <div className="px-3 py-2 text-2xs text-red-400 border-b border-slate-800">{uploadError}</div>
+          )}
           <div className="flex-1 overflow-auto">
             <TranscriptPanel
               entries={transcript?.entries ?? []}
               highlightedEntryId={highlightedTranscriptId}
-              loading={!transcript}
+              loading={!transcript || transcript.processingStatus === 'processing' || transcript.processingStatus === 'pending'}
+              onSpeakerMap={handleSpeakerMap}
+              diarizationStatus={transcript?.diarizationStatus}
+              diarizationError={transcript?.diarizationError}
             />
           </div>
         </div>
@@ -351,9 +481,33 @@ export default function ConsultationWorkspace() {
             {soapNote && (
               <span className="text-2xs text-slate-600">v{soapNote.version}{finalized ? ' · finalized' : ''}</span>
             )}
+            {!finalized && (
+              <button
+                className="btn-secondary btn-sm ml-auto"
+                onClick={handleGenerateSOAP}
+                disabled={
+                  isGeneratingSOAP ||
+                  transcript?.processingStatus !== 'completed' ||
+                  !transcript.entries.length
+                }
+              >
+                {isGeneratingSOAP ? 'Generating…' : 'Generate SOAP Notes'}
+              </button>
+            )}
           </div>
           <div className="flex-1 overflow-hidden">
-            {soapNote ? (
+            {soapError && (
+              <div className="mx-3 mt-3 rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                SOAP generation failed: {soapError}
+              </div>
+            )}
+            {isGeneratingSOAP && (
+              <div className="mx-3 mt-3 flex items-center gap-2 text-xs text-brand-300">
+                <span className="w-3 h-3 border-2 border-brand-500 border-t-transparent rounded-full animate-spin"/>
+                Generating from the saved transcript…
+              </div>
+            )}
+            {soapNote && !soapIsEmpty ? (
               <SOAPEditor
                 note={soapNote}
                 isStale={isStale}
@@ -361,8 +515,11 @@ export default function ConsultationWorkspace() {
                 isSaving={isSaving}
               />
             ) : (
-              <div className="flex items-center justify-center h-32 text-slate-500 text-sm">
-                No SOAP note found.
+              <div className="flex flex-col items-center justify-center h-full px-6 text-center text-slate-500 text-sm gap-2">
+                <p>No SOAP content has been generated for this consultation.</p>
+                {transcript?.processingStatus !== 'completed' && (
+                  <p className="text-xs text-slate-600">Wait for transcription to complete, then generate SOAP notes.</p>
+                )}
               </div>
             )}
           </div>

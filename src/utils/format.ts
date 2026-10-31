@@ -131,6 +131,7 @@ export function getSectionLabel(section: string): string {
 
 export function getSpeakerBadgeClass(role: string): string {
   switch (role) {
+    case 'doctor':
     case 'physician': return 'bg-brand-600/20 text-brand-300';
     case 'patient': return 'bg-slate-700 text-slate-300';
     case 'nurse': return 'bg-ok-600/20 text-ok-300';

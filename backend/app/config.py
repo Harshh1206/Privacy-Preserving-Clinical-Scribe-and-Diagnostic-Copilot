@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     team_a_max_audio_bytes: int = 25 * 1024 * 1024
     team_a_transcription_model: str = "whisper-large-v3-turbo"
     team_a_diarization_enabled: bool = False
+    team_b_soap_model: str = "openai/gpt-oss-120b"
     huggingface_token: str | None = None
 
     @property

@@ -1,6 +1,6 @@
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.models.schemas import (
@@ -9,8 +9,11 @@ from app.models.schemas import (
     CreateConsultationRequest,
     FinalizeRequest,
     FinalizeResponse,
+    SOAPNote,
     ValidationResult,
 )
+from app.services.errors import bad_request, conflict
+from app.services.soap_generation import GroqSOAPGenerator, SOAPGenerationError
 from app.services.store import get_store
 from app.database import get_db
 
@@ -49,6 +52,32 @@ def finalize_consultation(consultation_id: str, body: FinalizeRequest, db: Sessi
         consultation_id, body.physician_id, body.physician_name
     )
     return FinalizeResponse(consultation=consultation, soap_note=soap_note)
+
+
+@router.post("/{consultation_id}/generate-soap", response_model=SOAPNote)
+def generate_soap_note(consultation_id: str, db: Session = Depends(get_db)) -> SOAPNote:
+    store = get_store(db)
+    consultation = store.get_consultation(consultation_id)
+    transcript = store.get_transcript_by_consultation(consultation_id)
+
+    if transcript is None:
+        raise bad_request("No transcript exists for this consultation")
+    if transcript.processing_status != "completed":
+        raise conflict("The transcript is not ready. Processing must complete before SOAP generation")
+    if not transcript.entries:
+        raise bad_request("The transcript has no entries to generate a SOAP note from")
+
+    try:
+        generated = GroqSOAPGenerator().generate(transcript)
+    except SOAPGenerationError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    soap_note = store.generate_soap(
+        consultation_id=consultation_id,
+        soap_note_id=consultation.soap_note_id,
+        generated=generated,
+    )
+    return soap_note
 
 
 @router.get("/{consultation_id}/audit", response_model=list[AuditEntry])

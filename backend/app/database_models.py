@@ -32,6 +32,33 @@ class Patient(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
     consultations: Mapped[list["Consultation"]] = relationship(back_populates="patient")
+    clinical_records: Mapped[list["ClinicalRecord"]] = relationship(back_populates="patient", cascade="all, delete-orphan")
+
+
+class ClinicalRecord(Base):
+    __tablename__ = "patient_clinical_records"
+    __table_args__ = (
+        UniqueConstraint(
+            "patient_id", "consultation_id", "category", "name_normalized", "value", "unit", "source",
+            name="uq_patient_clinical_record_consultation",
+        ),
+    )
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    patient_id: Mapped[str] = mapped_column(ForeignKey("patients.id", ondelete="CASCADE"), index=True)
+    consultation_id: Mapped[str] = mapped_column(ForeignKey("consultations.id", ondelete="CASCADE"), index=True)
+    category: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    name_normalized: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    value: Mapped[str | None] = mapped_column(String, nullable=True)
+    unit: Mapped[str | None] = mapped_column(String, nullable=True)
+    source: Mapped[str | None] = mapped_column(String, nullable=True)
+    reaction: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str | None] = mapped_column(String, nullable=True)
+    verification: Mapped[str] = mapped_column(String, nullable=False, default="reported")
+    recorded_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+    patient: Mapped["Patient"] = relationship(back_populates="clinical_records")
 
 
 class Consultation(Base):

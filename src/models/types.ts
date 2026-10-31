@@ -10,6 +10,22 @@ export type SafetyStatus = 'CLEAR' | 'CONFLICT_DETECTED';
 
 // ─── Patient ─────────────────────────────────────────────────────────────────
 
+export interface ClinicalRecord {
+  id: string;
+  patientId: string;
+  consultationId: string;
+  category: 'condition' | 'medication' | 'measurement' | 'allergy';
+  name: string;
+  value?: string;
+  unit?: string;
+  source?: string;
+  reaction?: string;
+  status?: string;
+  verification: 'confirmed' | 'reported' | 'awaiting_review';
+  recordedAt?: string;
+  updatedAt: string;
+}
+
 export interface Patient {
   id: string;
   mrn: string;           // Medical Record Number
@@ -24,6 +40,20 @@ export interface Patient {
   lastVisit?: string;    // ISO date
   consultationCount: number;
   privacyLevel: 'standard' | 'sensitive' | 'restricted';
+  clinicalRecords?: ClinicalRecord[];
+}
+
+export interface CreatePatientRequest {
+  mrn: string;
+  firstName: string;
+  lastName: string;
+  dob: string;
+  sex: PatientSex;
+  phone?: string;
+  allergies?: string[];
+  conditions?: string[];
+  medications?: string[];
+  privacyLevel?: 'standard' | 'sensitive' | 'restricted';
 }
 
 // ─── Consultation ─────────────────────────────────────────────────────────────
@@ -46,9 +76,17 @@ export interface Consultation {
   safetyStatus: SafetyStatus;
 }
 
+export interface CreateConsultationRequest {
+  patientId: string;
+  chiefComplaint: string;
+  physicianId: string;
+  physicianName: string;
+  duration?: number;
+}
+
 // ─── Transcript ───────────────────────────────────────────────────────────────
 
-export type SpeakerRole = 'physician' | 'patient' | 'nurse' | 'system';
+export type SpeakerRole = 'doctor' | 'physician' | 'patient' | 'nurse' | 'system' | 'unknown';
 
 export interface TranscriptEntry {
   id: string;
@@ -57,9 +95,13 @@ export interface TranscriptEntry {
   offsetMs: number;      // milliseconds from start
   speaker: string;       // Display name
   speakerRole: SpeakerRole;
+  speakerId?: string;
+  speakerDisplayName?: string;
+  startTimeMs?: number;
+  endTimeMs?: number;
   text: string;
   linkedClaimIds?: string[]; // Claims that reference this entry
-  confidence?: number;   // 0-1 ASR confidence (Team A)
+  confidence?: number | null; // Genuine provider confidence normalized to 0-1; null when unavailable
 }
 
 export interface Transcript {
@@ -69,6 +111,13 @@ export interface Transcript {
   recordedAt: string;
   durationMs: number;
   language: string;
+  processingStatus?: 'pending' | 'processing' | 'completed' | 'failed';
+  processingError?: string;
+  processedAt?: string;
+  modelName?: string;
+  speakerMappings?: Record<string, { speakerRole: string; speakerDisplayName: string }>;
+  diarizationStatus?: 'disabled' | 'processing' | 'completed' | 'failed';
+  diarizationError?: string | null;
 }
 
 // ─── SOAP Note ────────────────────────────────────────────────────────────────

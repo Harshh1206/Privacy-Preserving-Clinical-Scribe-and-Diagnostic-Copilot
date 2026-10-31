@@ -30,7 +30,23 @@ SoapSectionKey = Literal["subjective", "objective", "assessment", "plan"]
 PrivacyLevel = Literal["standard", "sensitive", "restricted"]
 EntityType = Literal["symptom", "diagnosis", "medication", "procedure", "lab", "allergy", "vital"]
 MatchType = Literal["exact", "semantic", "inferred"]
-AuditAction = Literal["created", "edited", "validated", "revalidated", "finalized", "exported", "sent_to_ehr"]
+AuditAction = Literal["created", "generated", "edited", "validated", "revalidated", "finalized", "exported", "sent_to_ehr"]
+
+
+class ClinicalRecord(CamelModel):
+    id: str
+    patient_id: str
+    consultation_id: str
+    category: Literal["condition", "medication", "measurement", "allergy"]
+    name: str
+    value: Optional[str] = None
+    unit: Optional[str] = None
+    source: Optional[str] = None
+    reaction: Optional[str] = None
+    status: Optional[str] = None
+    verification: Literal["confirmed", "reported", "awaiting_review"] = "reported"
+    recorded_at: Optional[str] = None
+    updated_at: str
 
 
 class Patient(CamelModel):
@@ -44,6 +60,7 @@ class Patient(CamelModel):
     allergies: list[str] = Field(default_factory=list)
     conditions: list[str] = Field(default_factory=list)
     medications: list[str] = Field(default_factory=list)
+    clinical_records: list[ClinicalRecord] = Field(default_factory=list)
     last_visit: Optional[str] = None
     consultation_count: int = 0
     privacy_level: PrivacyLevel = "standard"
@@ -143,6 +160,46 @@ class SOAPNotePatch(CamelModel):
     objective: Optional[SOAPSection] = None
     assessment: Optional[SOAPSection] = None
     plan: Optional[SOAPSection] = None
+
+
+class ClinicalCondition(CamelModel):
+    name: str = Field(min_length=1, max_length=200)
+    status: Literal["active", "reported", "resolved", "unknown"] = "reported"
+    verification: Literal["confirmed", "reported", "awaiting_review"] = "reported"
+    source_consultation_id: Optional[str] = None
+
+
+class ClinicalMedication(CamelModel):
+    name: str = Field(min_length=1, max_length=200)
+    dose: Optional[str] = None
+    frequency: Optional[str] = None
+    status: Literal["current", "reported_current", "discontinued", "unknown"] = "reported_current"
+    verification: Literal["confirmed", "reported", "awaiting_review"] = "reported"
+    source_consultation_id: Optional[str] = None
+
+
+class ClinicalMeasurement(CamelModel):
+    name: str = Field(min_length=1, max_length=200)
+    value: Optional[str] = None
+    unit: Optional[str] = None
+    source: Literal["patient_reported", "clinic_measured", "unknown"] = "unknown"
+    recorded_at: Optional[str] = None
+    verification: Literal["confirmed", "reported", "awaiting_review"] = "reported"
+    source_consultation_id: Optional[str] = None
+
+
+class ClinicalAllergy(CamelModel):
+    substance: str = Field(min_length=1, max_length=200)
+    reaction: Optional[str] = None
+    verification: Literal["confirmed", "reported", "awaiting_review"] = "reported"
+    source_consultation_id: Optional[str] = None
+
+
+class ClinicalData(CamelModel):
+    conditions: list[ClinicalCondition] = Field(default_factory=list)
+    medications: list[ClinicalMedication] = Field(default_factory=list)
+    measurements: list[ClinicalMeasurement] = Field(default_factory=list)
+    allergies: list[ClinicalAllergy] = Field(default_factory=list)
 
 
 class MedicalEntity(CamelModel):

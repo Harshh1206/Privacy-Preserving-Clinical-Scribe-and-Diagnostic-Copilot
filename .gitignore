@@ -49,6 +49,7 @@ htmlcov/
 # Database and local development files
 *.sqlite3
 *.db
+clinical-scribe-*
 
 # OS-generated files
 Thumbs.db

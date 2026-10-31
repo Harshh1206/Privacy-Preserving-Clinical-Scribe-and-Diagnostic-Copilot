@@ -67,6 +67,10 @@ export default function PatientProfile() {
     );
   }
 
+  const clinicalRecords = patient.clinicalRecords ?? [];
+  const allergyRecords = clinicalRecords.filter(record => record.category === 'allergy');
+  const measurementRecords = clinicalRecords.filter(record => record.category === 'measurement');
+
   return (
     <div className="flex-1 overflow-auto">
       <div className="max-w-5xl mx-auto px-6 py-5">
@@ -100,6 +104,9 @@ export default function PatientProfile() {
             </div>
           </div>
           <div>
+            <Link to={`/record/${patient.id}`} className="btn-primary btn-sm mr-2">
+              Record Consultation
+            </Link>
             <span className={`badge ${patient.privacyLevel === 'restricted' ? 'badge-danger' : patient.privacyLevel === 'sensitive' ? 'badge-warn' : 'badge-neutral'}`}>
               {patient.privacyLevel}
             </span>
@@ -119,7 +126,7 @@ export default function PatientProfile() {
               </div>
             </div>
 
-            {patient.allergies.length > 0 && (
+            {(patient.allergies.length > 0 || allergyRecords.length > 0) && (
               <div className="panel border-danger-500/40">
                 <div className="panel-header bg-danger-500/5">
                   <span className="panel-title text-danger-400 flex items-center gap-1.5">
@@ -127,7 +134,9 @@ export default function PatientProfile() {
                   </span>
                 </div>
                 <div className="px-3 py-2 space-y-1">
-                  {patient.allergies.map((a, i) => (
+                  {(allergyRecords.length > 0 ? allergyRecords.map(record =>
+                    `${record.name}${record.reaction ? ` — ${record.reaction}` : ''} (${record.verification.replace('_', ' ')})`
+                  ) : patient.allergies).map((a, i) => (
                     <div key={i} className="text-sm text-danger-300 py-1 border-b border-slate-800 last:border-0">
                       {a}
                     </div>
@@ -154,6 +163,29 @@ export default function PatientProfile() {
                   <p className="text-sm text-slate-500">None on record.</p>
                 ) : patient.medications.map((m, i) => (
                   <div key={i} className="text-sm text-slate-300 py-1 border-b border-slate-800 last:border-0">{m}</div>
+                ))}
+              </div>
+            </div>
+
+            <div className="panel">
+              <div className="panel-header"><span className="panel-title">Clinical Measurements</span></div>
+              <div className="px-3 py-2 space-y-1">
+                {measurementRecords.length === 0 ? (
+                  <p className="text-sm text-slate-500">None on record.</p>
+                ) : measurementRecords.map(record => (
+                  <div key={record.id} className="text-sm text-slate-300 py-1 border-b border-slate-800 last:border-0">
+                    <span className="font-medium">{record.name}</span>
+                    {record.value ? `: ${record.value}${record.unit ? ` ${record.unit}` : ''}` : ''}
+                    <span className="block text-2xs text-slate-500">
+                      {record.source === 'patient_reported'
+                        ? 'Patient-reported'
+                        : record.source === 'clinic_measured'
+                          ? 'Measured in clinic'
+                          : 'Source not specified'}
+                      {record.recordedAt ? ` · ${formatDateTime(record.recordedAt)}` : ''}
+                      {` · ${record.verification.replace('_', ' ')}`}
+                    </span>
+                  </div>
                 ))}
               </div>
             </div>

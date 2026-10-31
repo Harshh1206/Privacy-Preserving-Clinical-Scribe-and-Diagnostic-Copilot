@@ -5,7 +5,7 @@
  */
 
 import type {
-  Patient, Consultation, Transcript, SOAPNote,
+  Patient, Consultation, CreatePatientRequest, CreateConsultationRequest, Transcript, SOAPNote,
   ValidationResult, AuditEntry, ExportRequest, ExportResult,
   TeamBApiResponse,
 } from '../models/types';
@@ -56,6 +56,13 @@ export async function getPatient(patientId: string): Promise<Patient | null> {
   return getOrNull<Patient>(`/api/patients/${patientId}`);
 }
 
+export async function createPatient(body: CreatePatientRequest): Promise<Patient> {
+  return request<Patient>('/api/patients', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 export async function getConsultations(patientId?: string): Promise<Consultation[]> {
   const q = patientId ? `?patientId=${encodeURIComponent(patientId)}` : '';
   return request<Consultation[]>(`/api/consultations${q}`);
@@ -65,12 +72,59 @@ export async function getConsultation(consultationId: string): Promise<Consultat
   return getOrNull<Consultation>(`/api/consultations/${consultationId}`);
 }
 
+export async function createConsultation(body: CreateConsultationRequest): Promise<Consultation> {
+  return request<Consultation>('/api/consultations', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 export async function getTranscript(transcriptId: string): Promise<Transcript | null> {
   return getOrNull<Transcript>(`/api/transcripts/${transcriptId}`);
 }
 
+export async function uploadTeamAAudio(consultationId: string, audio: File): Promise<Transcript> {
+  const form = new FormData();
+  form.append('audio', audio);
+  const res = await fetch(`${API_BASE}/api/team-a/transcriptions/${encodeURIComponent(consultationId)}`, {
+    method: 'POST',
+    body: form,
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(detailMessage(body, res.statusText || `HTTP ${res.status}`));
+  }
+  return body as Transcript;
+}
+
+export async function getTeamATranscriptionStatus(consultationId: string): Promise<Transcript | null> {
+  return getOrNull<Transcript>(`/api/team-a/transcriptions/${encodeURIComponent(consultationId)}`);
+}
+
+export async function mapTeamASpeaker(
+  consultationId: string,
+  speakerId: string,
+  speakerRole: 'doctor' | 'patient' | 'unknown',
+  speakerDisplayName: string,
+): Promise<Transcript> {
+  return request<Transcript>(
+    `/api/team-a/transcriptions/${encodeURIComponent(consultationId)}/speaker-mapping/${encodeURIComponent(speakerId)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ speakerRole, speakerDisplayName }),
+    },
+  );
+}
+
 export async function getSOAPNote(soapNoteId: string): Promise<SOAPNote | null> {
   return getOrNull<SOAPNote>(`/api/soap-notes/${soapNoteId}`);
+}
+
+export async function generateSOAPNote(consultationId: string): Promise<SOAPNote> {
+  return request<SOAPNote>(
+    `/api/consultations/${encodeURIComponent(consultationId)}/generate-soap`,
+    { method: 'POST' },
+  );
 }
 
 export async function updateSOAPNote(
