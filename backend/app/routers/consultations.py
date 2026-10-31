@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.models.schemas import (
     AuditEntry,
     Consultation,
+    CreateConsultationRequest,
     FinalizeRequest,
     FinalizeResponse,
     ValidationResult,
@@ -24,6 +25,17 @@ def list_consultations(patient_id: Optional[str] = Query(default=None, alias="pa
 @router.get("/{consultation_id}", response_model=Consultation)
 def get_consultation(consultation_id: str, db: Session = Depends(get_db)) -> Consultation:
     return get_store(db).get_consultation(consultation_id)
+
+
+@router.post("", response_model=Consultation, status_code=201)
+def create_consultation(body: CreateConsultationRequest, db: Session = Depends(get_db)) -> Consultation:
+    return get_store(db).create_consultation(
+        patient_id=body.patient_id,
+        chief_complaint=body.chief_complaint,
+        physician_id=body.physician_id,
+        physician_name=body.physician_name,
+        duration=body.duration,
+    )
 
 
 @router.post("/{consultation_id}/validate", response_model=ValidationResult)

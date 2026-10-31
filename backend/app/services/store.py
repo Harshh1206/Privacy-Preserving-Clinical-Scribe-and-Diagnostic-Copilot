@@ -75,7 +75,13 @@ class Store:
                 for patient in seed.PATIENTS:
                     row = db.get(DBPatient, patient.id)
                     if row is not None:
-                        db.delete(row)
+                        linked_consultation = db.scalar(
+                            select(DBConsultation.id)
+                            .where(DBConsultation.patient_id == row.id)
+                            .limit(1)
+                        )
+                        if linked_consultation is None:
+                            db.delete(row)
                 db.flush()
 
             patients = seed.PATIENTS
@@ -331,6 +337,11 @@ class Store:
         row = DBTranscript(
             id=t.id, consultation_id=t.consultation_id, recorded_at=t.recorded_at,
             duration_ms=t.duration_ms, language=t.language,
+            processing_status=t.processing_status, processing_error=t.processing_error,
+            processed_at=t.processed_at, model_name=t.model_name,
+            speaker_mappings=t.speaker_mappings,
+            diarization_status=t.diarization_status,
+            diarization_error=t.diarization_error,
         )
         row.entries = [
             TranscriptEntry(
@@ -338,6 +349,8 @@ class Store:
                 timestamp=e.timestamp, offset_ms=e.offset_ms, speaker=e.speaker,
                 speaker_role=e.speaker_role, text=e.text,
                 linked_claim_ids=e.linked_claim_ids, confidence=e.confidence,
+                speaker_id=e.speaker_id, speaker_display_name=e.speaker_display_name,
+                start_time_ms=e.start_time_ms, end_time_ms=e.end_time_ms,
             )
             for e in t.entries
         ]
@@ -411,14 +424,32 @@ class Store:
         })
 
     def _transcript(self, row: DBTranscript) -> Transcript:
-        entries = [TranscriptEntrySchema.model_validate({
-            "id": e.id, "consultationId": e.consultation_id, "timestamp": e.timestamp,
-            "offsetMs": e.offset_ms, "speaker": e.speaker, "speakerRole": e.speaker_role,
-            "text": e.text, "linkedClaimIds": e.linked_claim_ids, "confidence": e.confidence,
-        }) for e in sorted(row.entries, key=lambda x: x.offset_ms)]
+        mappings = dict(row.speaker_mappings or {})
+        entries: list[TranscriptEntrySchema] = []
+        for e in sorted(row.entries, key=lambda x: x.offset_ms):
+            speaker_role = e.speaker_role
+            speaker = e.speaker
+            speaker_display_name = e.speaker_display_name
+            if e.speaker_id and e.speaker_id in mappings:
+                mapping = mappings[e.speaker_id]
+                speaker_role = mapping.get("speakerRole", speaker_role)
+                speaker_display_name = mapping.get("speakerDisplayName", speaker_display_name)
+                speaker = speaker_display_name or speaker
+            entries.append(TranscriptEntrySchema.model_validate({
+                "id": e.id, "consultationId": e.consultation_id, "timestamp": e.timestamp,
+                "offsetMs": e.offset_ms, "speaker": speaker, "speakerRole": speaker_role,
+                "text": e.text, "linkedClaimIds": e.linked_claim_ids, "confidence": e.confidence,
+                "speakerId": e.speaker_id, "speakerDisplayName": speaker_display_name,
+                "startTimeMs": e.start_time_ms, "endTimeMs": e.end_time_ms,
+            }))
         return Transcript.model_validate({
             "id": row.id, "consultationId": row.consultation_id, "entries": entries,
             "recordedAt": row.recorded_at, "durationMs": row.duration_ms, "language": row.language,
+            "processingStatus": row.processing_status, "processingError": row.processing_error,
+            "processedAt": row.processed_at, "modelName": row.model_name,
+            "speakerMappings": row.speaker_mappings or {},
+            "diarizationStatus": getattr(row, "diarization_status", "disabled"),
+            "diarizationError": getattr(row, "diarization_error", None),
         })
 
     def _validation(self, row: DBValidationResult) -> ValidationResult:
@@ -461,6 +492,50 @@ class Store:
         finally:
             self._close(db)
 
+    def create_patient(
+        self,
+        mrn: str,
+        first_name: str,
+        last_name: str,
+        dob: str,
+        sex: str,
+        phone: str | None,
+        allergies: list[str],
+        conditions: list[str],
+        medications: list[str],
+        privacy_level: str,
+    ) -> Patient:
+        db = self._session()
+        try:
+            mrn = mrn.strip()
+            existing = db.scalar(select(DBPatient).where(DBPatient.mrn == mrn))
+            if existing is not None:
+                raise conflict("A patient with this MRN already exists")
+
+            row = DBPatient(
+                id=f"pt-{uuid.uuid4()}",
+                mrn=mrn,
+                first_name=first_name.strip(),
+                last_name=last_name.strip(),
+                dob=dob.strip(),
+                sex=sex,
+                phone=phone.strip() if phone and phone.strip() else None,
+                allergies=[item.strip() for item in allergies if item.strip()],
+                conditions=[item.strip() for item in conditions if item.strip()],
+                medications=[item.strip() for item in medications if item.strip()],
+                consultation_count=0,
+                privacy_level=privacy_level,
+            )
+            db.add(row)
+            db.commit()
+            db.refresh(row)
+            return self._patient(row)
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            self._close(db)
+
     def list_consultations(self, patient_id: Optional[str] = None) -> list[Consultation]:
         db = self._session()
         try:
@@ -480,12 +555,288 @@ class Store:
         finally:
             self._close(db)
 
+    def create_consultation(
+        self,
+        patient_id: str,
+        chief_complaint: str,
+        physician_id: str,
+        physician_name: str,
+        duration: int | None = None,
+    ) -> Consultation:
+        db = self._session()
+        try:
+            patient = db.get(DBPatient, patient_id)
+            if patient is None:
+                raise not_found("Patient", patient_id)
+
+            consultation_id = f"con-{uuid.uuid4()}"
+            transcript_id = f"tx-{uuid.uuid4()}"
+            soap_note_id = f"soap-{uuid.uuid4()}"
+            ts = now_iso()
+
+            transcript = DBTranscript(
+                id=transcript_id,
+                consultation_id=consultation_id,
+                recorded_at=ts,
+                duration_ms=0,
+                language="en-US",
+                processing_status="pending",
+            )
+            empty_section = lambda: {"text": "", "lastEditedAt": None, "lastEditedBy": None}
+            soap = DBSOAPNote(
+                id=soap_note_id,
+                consultation_id=consultation_id,
+                subjective=empty_section(),
+                objective=empty_section(),
+                assessment=empty_section(),
+                plan=empty_section(),
+                created_at=ts,
+                updated_at=ts,
+                is_finalized=False,
+                version=1,
+            )
+            consultation = DBConsultation(
+                id=consultation_id,
+                patient_id=patient_id,
+                date=ts,
+                chief_complaint=chief_complaint.strip(),
+                status="in-progress",
+                physician_id=physician_id,
+                physician_name=physician_name,
+                duration=duration,
+                transcript_id=transcript_id,
+                soap_note_id=soap_note_id,
+                created_at=ts,
+                updated_at=ts,
+                safety_status="CLEAR",
+            )
+
+            db.add_all([consultation, transcript, soap])
+            db.flush()
+            patient.consultation_count = (patient.consultation_count or 0) + 1
+            patient.last_visit = ts
+            db.add(DBAuditEntry(
+                id=f"au-{uuid.uuid4().hex[:10]}",
+                consultation_id=consultation_id,
+                timestamp=ts,
+                action="created",
+                actor=physician_name,
+                detail=f"Consultation created for {chief_complaint.strip()}.",
+            ))
+            db.commit()
+            db.refresh(consultation)
+            return self._consultation(consultation)
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            self._close(db)
+
     def get_transcript(self, transcript_id: str) -> Transcript:
         db = self._session()
         try:
             row = db.get(DBTranscript, transcript_id)
             if not row: raise not_found("Transcript", transcript_id)
             return self._transcript(row)
+        finally:
+            self._close(db)
+
+    def get_transcript_by_consultation(self, consultation_id: str) -> Transcript | None:
+        db = self._session()
+        try:
+            row = db.scalar(
+                select(DBTranscript).where(DBTranscript.consultation_id == consultation_id)
+            )
+            return self._transcript(row) if row else None
+        finally:
+            self._close(db)
+
+    def set_transcript_processing_status(
+        self,
+        consultation_id: str,
+        status: str,
+        *,
+        error: str | None = None,
+        model_name: str | None = None,
+        processed_at: str | None = None,
+    ) -> Transcript:
+        db = self._session()
+        try:
+            consultation = db.get(DBConsultation, consultation_id)
+            if consultation is None:
+                raise not_found("Consultation", consultation_id)
+            row = db.scalar(
+                select(DBTranscript).where(DBTranscript.consultation_id == consultation_id)
+            )
+            if row is None:
+                row = DBTranscript(
+                    id=f"tx-{uuid.uuid4()}",
+                    consultation_id=consultation_id,
+                    recorded_at=now_iso(),
+                    duration_ms=0,
+                    language="en-US",
+                    processing_status=status,
+                )
+                db.add(row)
+                db.flush()
+                consultation.transcript_id = row.id
+                consultation.updated_at = now_iso()
+            row.processing_status = status
+            row.processing_error = error
+            if status == "processing":
+                row.recorded_at = now_iso()
+                row.processed_at = None
+            if status in {"completed", "failed"}:
+                row.recorded_at = row.recorded_at or now_iso()
+            if model_name is not None:
+                row.model_name = model_name
+            if processed_at is not None:
+                row.processed_at = processed_at
+            db.flush()
+            db.commit()
+            return self._transcript(row)
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            self._close(db)
+
+    def set_speaker_mapping(
+        self,
+        consultation_id: str,
+        speaker_id: str,
+        speaker_role: str,
+        speaker_display_name: str,
+    ) -> Transcript:
+        db = self._session()
+        try:
+            row = db.scalar(
+                select(DBTranscript).where(DBTranscript.consultation_id == consultation_id)
+            )
+            if row is None:
+                raise not_found("Transcript", consultation_id)
+            mappings = dict(row.speaker_mappings or {})
+            mappings[speaker_id] = {
+                "speakerRole": speaker_role,
+                "speakerDisplayName": speaker_display_name,
+            }
+            row.speaker_mappings = mappings
+            for entry in row.entries:
+                if entry.speaker_id == speaker_id:
+                    entry.speaker_role = speaker_role
+                    entry.speaker = speaker_display_name
+                    entry.speaker_display_name = speaker_display_name
+            db.commit()
+            db.refresh(row)
+            return self._transcript(row)
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            self._close(db)
+
+    def set_transcript_diarization_status(
+        self,
+        consultation_id: str,
+        status: str,
+        *,
+        error: str | None = None,
+    ) -> Transcript:
+        db = self._session()
+        try:
+            row = db.scalar(
+                select(DBTranscript).where(DBTranscript.consultation_id == consultation_id)
+            )
+            if row is None:
+                raise not_found("Transcript", consultation_id)
+            row.diarization_status = status
+            row.diarization_error = error
+            db.commit()
+            db.refresh(row)
+            return self._transcript(row)
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            self._close(db)
+
+    def replace_transcript_entries(
+        self,
+        consultation_id: str,
+        entries: list[dict],
+        *,
+        language: str,
+        duration_ms: int,
+        model_name: str,
+    ) -> Transcript:
+        db = self._session()
+        try:
+            consultation = db.get(DBConsultation, consultation_id)
+            if consultation is None:
+                raise not_found("Consultation", consultation_id)
+            row = db.scalar(
+                select(DBTranscript).where(DBTranscript.consultation_id == consultation_id)
+            )
+            if row is None:
+                row = DBTranscript(
+                    id=f"tx-{uuid.uuid4()}",
+                    consultation_id=consultation_id,
+                    recorded_at=now_iso(),
+                    duration_ms=duration_ms,
+                    language=language,
+                )
+                db.add(row)
+                db.flush()
+                consultation.transcript_id = row.id
+            else:
+                db.query(TranscriptEntry).where(
+                    TranscriptEntry.transcript_id == row.id
+                ).delete(synchronize_session=False)
+            row.recorded_at = now_iso()
+            row.duration_ms = duration_ms
+            row.language = language
+            row.processing_status = "completed"
+            row.processing_error = None
+            row.processed_at = now_iso()
+            row.model_name = model_name
+            mappings = dict(row.speaker_mappings or {})
+            for entry in entries:
+                speaker_id = entry.get("speaker_id")
+                speaker_role = entry.get("speaker_role", "unknown")
+                speaker = entry.get("speaker", "Unknown speaker")
+                speaker_display_name = entry.get("speaker_display_name")
+                if speaker_id and speaker_id in mappings:
+                    mapping = mappings[speaker_id]
+                    speaker_role = mapping.get("speakerRole", speaker_role)
+                    speaker_display_name = mapping.get(
+                        "speakerDisplayName",
+                        speaker_display_name,
+                    )
+                    speaker = speaker_display_name
+                db.add(TranscriptEntry(
+                    id=f"te-{uuid.uuid4()}",
+                    transcript_id=row.id,
+                    consultation_id=consultation_id,
+                    timestamp=entry["timestamp"],
+                    offset_ms=entry["offset_ms"],
+                    speaker=speaker,
+                    speaker_role=speaker_role,
+                    speaker_id=speaker_id,
+                    speaker_display_name=speaker_display_name,
+                    start_time_ms=entry.get("start_time_ms"),
+                    end_time_ms=entry.get("end_time_ms"),
+                    text=entry["text"],
+                    linked_claim_ids=None,
+                    confidence=entry.get("confidence"),
+                ))
+            consultation.updated_at = now_iso()
+            db.flush()
+            db.commit()
+            db.expire(row, ["entries"])
+            return self._transcript(row)
+        except Exception:
+            db.rollback()
+            raise
         finally:
             self._close(db)
 

@@ -25,7 +25,7 @@ ClaimStatus = Literal["supported", "unsupported", "conflict", "pending"]
 Severity = Literal["low", "medium", "high", "critical"]
 HallucinationRisk = Literal["low", "moderate", "high"]
 ExportFormat = Literal["pdf", "fhir", "ehr"]
-SpeakerRole = Literal["physician", "patient", "nurse", "system"]
+SpeakerRole = Literal["doctor", "physician", "patient", "nurse", "system", "unknown"]
 SoapSectionKey = Literal["subjective", "objective", "assessment", "plan"]
 PrivacyLevel = Literal["standard", "sensitive", "restricted"]
 EntityType = Literal["symptom", "diagnosis", "medication", "procedure", "lab", "allergy", "vital"]
@@ -46,6 +46,19 @@ class Patient(CamelModel):
     medications: list[str] = Field(default_factory=list)
     last_visit: Optional[str] = None
     consultation_count: int = 0
+    privacy_level: PrivacyLevel = "standard"
+
+
+class CreatePatientRequest(CamelModel):
+    mrn: str = Field(min_length=1, max_length=100)
+    first_name: str = Field(min_length=1, max_length=100)
+    last_name: str = Field(min_length=1, max_length=100)
+    dob: str = Field(min_length=1, max_length=10)
+    sex: PatientSex
+    phone: Optional[str] = None
+    allergies: list[str] = Field(default_factory=list)
+    conditions: list[str] = Field(default_factory=list)
+    medications: list[str] = Field(default_factory=list)
     privacy_level: PrivacyLevel = "standard"
 
 
@@ -74,6 +87,10 @@ class TranscriptEntry(CamelModel):
     offset_ms: int
     speaker: str
     speaker_role: SpeakerRole
+    speaker_id: Optional[str] = None
+    speaker_display_name: Optional[str] = None
+    start_time_ms: Optional[int] = None
+    end_time_ms: Optional[int] = None
     text: str
     linked_claim_ids: Optional[list[str]] = None
     confidence: Optional[float] = None
@@ -86,6 +103,18 @@ class Transcript(CamelModel):
     recorded_at: str
     duration_ms: int
     language: str = "en-US"
+    processing_status: Literal["pending", "processing", "completed", "failed"] = "completed"
+    processing_error: Optional[str] = None
+    processed_at: Optional[str] = None
+    model_name: Optional[str] = None
+    speaker_mappings: dict[str, dict[str, str]] = Field(default_factory=dict)
+    diarization_status: Literal["disabled", "processing", "completed", "failed"] = "disabled"
+    diarization_error: Optional[str] = None
+
+
+class SpeakerMappingRequest(CamelModel):
+    speaker_role: Literal["doctor", "patient", "unknown"]
+    speaker_display_name: str = Field(min_length=1, max_length=100)
 
 
 class SOAPSection(CamelModel):
@@ -202,6 +231,14 @@ class FinalizeRequest(CamelModel):
 class FinalizeResponse(CamelModel):
     consultation: Consultation
     soap_note: SOAPNote
+
+
+class CreateConsultationRequest(CamelModel):
+    patient_id: str
+    chief_complaint: str = Field(min_length=1)
+    physician_id: str = Field(min_length=1)
+    physician_name: str = Field(min_length=1)
+    duration: Optional[int] = Field(default=None, ge=0)
 
 
 class TeamBIngest(CamelModel):

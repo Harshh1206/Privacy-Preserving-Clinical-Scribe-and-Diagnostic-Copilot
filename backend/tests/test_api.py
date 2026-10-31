@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import uuid
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app.database import SessionLocal
+from app.database_models import Patient as DBPatient
 from app.main import app
 from app.services.store import reset_store
 
@@ -39,17 +42,42 @@ def test_health_and_docs(client: TestClient):
 
 
 def test_patients_and_consultations(client: TestClient):
-    patients = client.get("/api/patients").json()
-    assert len(patients) == 3
-    assert patients[0]["firstName"]
-    pt = client.get("/api/patients/pt-003").json()
-    assert "Penicillin" in pt["allergies"][0]
-    cons = client.get("/api/consultations").json()
-    assert len(cons) == 4
-    filtered = client.get("/api/consultations", params={"patientId": "pt-001"}).json()
-    assert all(c["patientId"] == "pt-001" for c in filtered)
-    missing = client.get("/api/patients/nope")
-    assert missing.status_code == 404
+    suffix = uuid.uuid4().hex[:10]
+    patient_id = None
+    db = SessionLocal()
+    try:
+        created = client.post("/api/patients", json={
+            "mrn": f"QA-API-{suffix}",
+            "firstName": "Fixture",
+            "lastName": f"Patient-{suffix}",
+            "dob": "1990-01-01",
+            "sex": "O",
+            "allergies": [],
+            "conditions": [],
+            "medications": [],
+            "privacyLevel": "standard",
+        })
+        assert created.status_code == 201
+        patient_id = created.json()["id"]
+
+        patients = client.get("/api/patients").json()
+        patient_ids = {patient["id"] for patient in patients}
+        assert {"pt-001", "pt-002", "pt-003", patient_id} <= patient_ids
+        assert patients[0]["firstName"]
+        pt = client.get("/api/patients/pt-003").json()
+        assert "Penicillin" in pt["allergies"][0]
+        cons = client.get("/api/consultations").json()
+        consultation_ids = {consultation["id"] for consultation in cons}
+        assert {"con-001", "con-002", "con-003", "con-004"} <= consultation_ids
+        filtered = client.get("/api/consultations", params={"patientId": "pt-001"}).json()
+        assert all(c["patientId"] == "pt-001" for c in filtered)
+        missing = client.get("/api/patients/nope")
+        assert missing.status_code == 404
+    finally:
+        if patient_id:
+            db.query(DBPatient).filter(DBPatient.id == patient_id).delete(synchronize_session=False)
+            db.commit()
+        db.close()
 
 
 def test_clean_scenario_grounding_calculated(client: TestClient):

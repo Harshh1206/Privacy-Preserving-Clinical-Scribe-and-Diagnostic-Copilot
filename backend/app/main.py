@@ -11,6 +11,7 @@ from app.routers.patients import router as patients_router
 from app.routers.records import transcripts_router, validations_router
 from app.routers.soap import router as soap_router
 from app.routers.team_b import router as team_b_router
+from app.routers.team_a import router as team_a_router
 from app.services.store import get_store
 from app.database import check_database_connection, engine
 
@@ -56,6 +57,7 @@ app.include_router(transcripts_router)
 app.include_router(validations_router)
 app.include_router(exports_router)
 app.include_router(team_b_router)
+app.include_router(team_a_router)
 
 
 @app.get("/health", tags=["meta"])

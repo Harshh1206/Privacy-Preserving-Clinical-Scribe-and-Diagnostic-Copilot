@@ -9,3 +9,8 @@ pytest==8.3.5
 SQLAlchemy==2.0.40
 psycopg[binary]==3.2.6
 alembic==1.15.2
+groq==0.31.0
+python-multipart==0.0.20
+pyannote.audio>=3.1,<4
+torch==2.7.1
+torchaudio==2.7.1
