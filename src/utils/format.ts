@@ -1,4 +1,34 @@
-import type { HallucinationRisk, ClaimStatus, ConsultationStatus, Severity } from '../models/types';
+import type { HallucinationRisk, Claim, ClaimStatus, ConsultationStatus, Evidence, Severity } from '../models/types';
+
+export type FindingStatus = 'supported' | 'unsupported' | 'conflict' | 'needs-review' | 'not-assessed';
+
+const FINDING_STATUS_PRESENTATION: Record<FindingStatus, { label: string; className: string }> = {
+  supported: { label: 'Supported', className: 'bg-ok-500/10 text-ok-300' },
+  unsupported: { label: 'Unsupported', className: 'bg-danger-500/10 text-danger-300' },
+  conflict: { label: 'Conflict', className: 'bg-warn-500/10 text-warn-300' },
+  'needs-review': { label: 'Needs review', className: 'bg-brand-500/10 text-brand-300' },
+  'not-assessed': { label: 'Not assessed', className: 'bg-slate-800 text-slate-300' },
+};
+
+function isExplicitlyUndocumented(text: string): boolean {
+  return /\b(?:not\s+(?:been\s+)?(?:documented|discussed|assessed|obtained|recorded|elicited)|not\s+on\s+file|unknown)\b/i.test(text)
+    || /\b(?:no|without)\s+(?:documented|recorded|available)\s+(?:family|social|surgical|medical)\s+history\b/i.test(text)
+    || /\b(?:no|without)\s+(?:family|social|surgical|medical)\s+history\s+(?:was\s+)?(?:documented|discussed|recorded|obtained|elicited)\b/i.test(text)
+    || /\b(?:no|without)\s+(?:documented|recorded|available)\s+(?:exam|examination|findings)\b/i.test(text);
+}
+
+export function getFindingStatus(claim: Claim, evidenceList: Evidence[]): FindingStatus {
+  if (claim.status === 'conflict') return 'conflict';
+  if (isExplicitlyUndocumented(claim.text)) return 'not-assessed';
+  if (claim.status === 'pending') return 'needs-review';
+  if (claim.status === 'unsupported') return 'unsupported';
+  if (evidenceList.some(evidence => evidence.matchType === 'inferred')) return 'needs-review';
+  return 'supported';
+}
+
+export function getFindingStatusPresentation(status: FindingStatus): { label: string; className: string } {
+  return FINDING_STATUS_PRESENTATION[status];
+}
 
 // ─── Date formatting ──────────────────────────────────────────────────────────
 

@@ -1,5 +1,7 @@
 import type { Claim, Evidence } from '../models/types';
-import { getClaimBadgeClass, getClaimStatusLabel, getSeverityBadgeClass, getSectionLabel } from '../utils/format';
+import {
+  getFindingStatus, getFindingStatusPresentation, getSeverityBadgeClass, getSectionLabel,
+} from '../utils/format';
 
 interface EvidencePanelProps {
   claim: Claim | null;
@@ -50,6 +52,9 @@ export default function EvidencePanel({ claim, evidenceList, onJumpToTranscript 
     );
   }
 
+  const findingStatus = getFindingStatus(claim, evidenceList);
+  const findingPresentation = getFindingStatusPresentation(findingStatus);
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Claim detail */}
@@ -61,7 +66,7 @@ export default function EvidencePanel({ claim, evidenceList, onJumpToTranscript 
           <p className="text-sm text-slate-200 leading-snug flex-1">{claim.text}</p>
         </div>
         <div className="flex items-center gap-2 ml-7">
-          <span className={getClaimBadgeClass(claim.status)}>{getClaimStatusLabel(claim.status)}</span>
+          <span className={`rounded px-1.5 py-0.5 text-2xs font-medium ${findingPresentation.className}`}>{findingPresentation.label}</span>
           <span className={getSeverityBadgeClass(claim.severity)}>{claim.severity}</span>
         </div>
       </div>
@@ -74,21 +79,15 @@ export default function EvidencePanel({ claim, evidenceList, onJumpToTranscript 
         </div>
       )}
 
-      {/* Suggested correction */}
-      {claim.suggestedCorrection && (
-        <div className="px-3 py-2 bg-brand-500/5 border-b border-brand-500/20">
-          <p className="text-xs font-semibold text-brand-400 mb-1">Suggested correction</p>
-          <p className="text-xs text-brand-300 leading-relaxed">{claim.suggestedCorrection}</p>
-        </div>
-      )}
-
       {/* Evidence list */}
       <div className="flex-1 overflow-auto">
         {evidenceList.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center px-4 py-6">
             <IconNoEvidence />
             <p className="text-xs text-slate-500 mt-2">
-              {claim.status === 'unsupported'
+              {findingStatus === 'not-assessed'
+                ? 'This information was not documented or discussed in the encounter.'
+                : findingStatus === 'unsupported'
                 ? 'No supporting evidence found in the transcript.'
                 : 'No evidence linked to this claim.'}
             </p>

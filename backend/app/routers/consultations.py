@@ -13,7 +13,7 @@ from app.models.schemas import (
     ValidationResult,
 )
 from app.services.errors import bad_request, conflict
-from app.services.soap_generation import GroqSOAPGenerator, SOAPGenerationError
+from app.services.soap_generation import OllamaSOAPGenerator, SOAPGenerationError
 from app.services.store import get_store
 from app.database import get_db
 
@@ -68,7 +68,7 @@ def generate_soap_note(consultation_id: str, db: Session = Depends(get_db)) -> S
         raise bad_request("The transcript has no entries to generate a SOAP note from")
 
     try:
-        generated = GroqSOAPGenerator().generate(transcript)
+        generated = OllamaSOAPGenerator().generate(transcript)
     except SOAPGenerationError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

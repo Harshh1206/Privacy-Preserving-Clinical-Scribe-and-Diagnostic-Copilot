@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -23,7 +24,18 @@ class Settings(BaseSettings):
     team_a_max_audio_bytes: int = 25 * 1024 * 1024
     team_a_transcription_model: str = "whisper-large-v3-turbo"
     team_a_diarization_enabled: bool = False
-    team_b_soap_model: str = "openai/gpt-oss-120b"
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: Literal["qwen3:8b"] = "qwen3:8b"
+    ollama_connect_timeout_seconds: float = 10.0
+    ollama_request_timeout_seconds: float = 300.0
+    ollama_parallel_agents: bool = False
+    ollama_num_ctx: int = 32768
+    ollama_num_predict_subjective_objective: int = 2200
+    ollama_num_predict_assessment_plan: int = 2400
+    ollama_temperature: float = 0.0
+    ollama_keep_alive: str = "30m"
+    ollama_pool_max_connections: int = 4
+    ollama_pool_max_keepalive_connections: int = 2
     huggingface_token: str | None = None
 
     @property

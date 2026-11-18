@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import type { ChangeEvent } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import type { Consultation, Patient, Transcript, SOAPNote, ValidationResult, Claim, Evidence, AuditEntry } from '../models/types';
@@ -14,7 +14,6 @@ import TranscriptPanel from '../components/TranscriptPanel';
 import SOAPEditor from '../components/SOAPEditor';
 import ValidationPanel from '../components/ValidationPanel';
 import EvidencePanel from '../components/EvidencePanel';
-import FinalizeDialog from '../components/FinalizeDialog';
 import ExportDialog from '../components/ExportDialog';
 
 function IconBack() {
@@ -126,12 +125,17 @@ export default function ConsultationWorkspace() {
   const [isGeneratingSOAP, setIsGeneratingSOAP] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [soapError, setSoapError] = useState<string | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const [isFinalizing, setIsFinalizing] = useState(false);
+  const [finalizeError, setFinalizeError] = useState<string | null>(null);
+  const [finalizeSuccess, setFinalizeSuccess] = useState(false);
+  const [draftGenerated, setDraftGenerated] = useState(false);
+  const finalizationInFlightRef = useRef(false);
 
   const [selectedClaim, setSelectedClaim] = useState<Claim | null>(null);
   const [selectedEvidence, setSelectedEvidence] = useState<Evidence[]>([]);
   const [highlightedTranscriptId, setHighlightedTranscriptId] = useState<string | null>(null);
 
-  const [showFinalize, setShowFinalize] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [showAudit, setShowAudit] = useState(false);
 
@@ -261,10 +265,12 @@ export default function ConsultationWorkspace() {
     if (!consultationId) return;
     setIsGeneratingSOAP(true);
     setSoapError(null);
+    setDraftGenerated(false);
     try {
       const generated = await generateSOAPNote(consultationId);
       setSoapNote(generated);
       setValidation(prev => prev ? { ...prev, isStale: true } : prev);
+      setDraftGenerated(true);
       const audit = await getAuditTrail(consultationId);
       setAuditTrail(audit);
     } catch (e) {
@@ -278,11 +284,14 @@ export default function ConsultationWorkspace() {
   async function handleRevalidate() {
     if (!consultationId) return;
     setIsValidating(true);
+    setValidationError(null);
     try {
       const val = await validateConsultation(consultationId);
       setValidation(val);
       const audit = await getAuditTrail(consultationId);
       setAuditTrail(audit);
+    } catch (e) {
+      setValidationError(e instanceof Error ? e.message : String(e));
     } finally {
       setIsValidating(false);
     }
@@ -290,14 +299,27 @@ export default function ConsultationWorkspace() {
 
   // Finalize
   async function handleFinalize() {
-    if (!consultationId) return;
-    const { consultation: fc, soapNote: fn } = await finalizeConsultation(
-      consultationId, 'dr-001', 'Dr. Sarah Chen'
-    );
-    setConsultation(fc);
-    setSoapNote(fn);
-    const audit = await getAuditTrail(consultationId);
-    setAuditTrail(audit);
+    if (!consultationId || isFinalizing || finalized) return;
+    if (finalizationInFlightRef.current) return;
+    finalizationInFlightRef.current = true;
+    setIsFinalizing(true);
+    setFinalizeError(null);
+    setFinalizeSuccess(false);
+    try {
+      const { consultation: fc, soapNote: fn } = await finalizeConsultation(
+        consultationId, 'dr-001', 'Dr. Sarah Chen'
+      );
+      setConsultation(fc);
+      setSoapNote(fn);
+      setFinalizeSuccess(true);
+      const audit = await getAuditTrail(consultationId);
+      setAuditTrail(audit);
+    } catch (e) {
+      setFinalizeError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setIsFinalizing(false);
+      finalizationInFlightRef.current = false;
+    }
   }
 
   // Claim → evidence → transcript jump
@@ -406,10 +428,11 @@ export default function ConsultationWorkspace() {
 
               <button
                 className="btn-primary btn-sm flex items-center gap-1.5"
-                onClick={() => setShowFinalize(true)}
+                onClick={handleFinalize}
+                disabled={isFinalizing || isValidating}
               >
                 <IconLock />
-                Finalize Note
+                {isFinalizing ? 'Finalizing…' : 'Finalize Note'}
               </button>
             </>
           )}
@@ -430,6 +453,18 @@ export default function ConsultationWorkspace() {
         <span>{consultation.physicianName}</span>
         {consultation.duration && <span>{consultation.duration} min</span>}
       </div>
+
+      {(finalizeSuccess || finalizeError) && (
+        <div className={`shrink-0 px-4 py-2 text-xs border-b ${
+          finalizeSuccess
+            ? 'border-ok-500/20 bg-ok-500/10 text-ok-300'
+            : 'border-danger-500/30 bg-danger-500/10 text-danger-300'
+        }`}>
+          {finalizeSuccess
+            ? 'Note finalized successfully. The SOAP note is now read-only.'
+            : `Finalization failed: ${finalizeError}`}
+        </div>
+      )}
 
       {/* Main 3-column layout */}
       <div className="flex-1 flex overflow-hidden min-h-0">
@@ -507,6 +542,11 @@ export default function ConsultationWorkspace() {
                 Generating from the saved transcript…
               </div>
             )}
+            {draftGenerated && !isGeneratingSOAP && (
+              <div className="mx-3 mt-3 rounded border border-brand-500/30 bg-brand-500/10 px-3 py-2 text-xs text-brand-200">
+                SOAP draft generated and available for clinician review. Review the four sections and validation findings before finalizing.
+              </div>
+            )}
             {soapNote && !soapIsEmpty ? (
               <SOAPEditor
                 note={soapNote}
@@ -538,16 +578,32 @@ export default function ConsultationWorkspace() {
               )}
             </div>
             <div className="flex-1 overflow-hidden">
-              {validation ? (
+              {isValidating ? (
+                <div className="flex h-40 items-center justify-center">
+                  <div className="text-center">
+                    <div className="w-5 h-5 border-2 border-brand-500 border-t-transparent rounded-full animate-spin mx-auto mb-1.5"/>
+                    <p className="text-xs text-slate-500">Running validation against the current SOAP note…</p>
+                  </div>
+                </div>
+              ) : validationError ? (
+                <div className="mx-3 mt-3 rounded border border-danger-500/30 bg-danger-500/10 px-3 py-3 text-xs text-danger-300">
+                  <p className="font-medium mb-1">Validation could not be completed</p>
+                  <p className="text-danger-300/80">{validationError}</p>
+                </div>
+              ) : validation ? (
                 <ValidationPanel
                   validation={validation}
+                  patient={patient}
+                  consultationId={consultation.id}
                   onClaimSelect={handleClaimSelect}
+                  onJumpToTranscript={handleJumpToTranscript}
                   selectedClaimId={selectedClaim?.id}
                   loading={isValidating}
                 />
               ) : (
-                <div className="flex items-center justify-center h-32 text-slate-500 text-sm">
-                  No validation data. Run Revalidate.
+                <div className="mx-4 mt-4 rounded border border-slate-800 bg-slate-900 px-3 py-4 text-center text-slate-500">
+                  <p className="text-sm text-slate-400 mb-1">Validation has not been performed</p>
+                  <p className="text-xs">Use Revalidate to check the current SOAP note against the consultation transcript.</p>
                 </div>
               )}
             </div>
@@ -595,15 +651,6 @@ export default function ConsultationWorkspace() {
       </div>
 
       {/* Dialogs */}
-      <FinalizeDialog
-        isOpen={showFinalize}
-        onClose={() => setShowFinalize(false)}
-        onConfirm={handleFinalize}
-        validation={validation}
-        consultationId={consultation.id}
-        patientName={`${patient.firstName} ${patient.lastName}`}
-      />
-
       <ExportDialog
         isOpen={showExport}
         onClose={() => setShowExport(false)}

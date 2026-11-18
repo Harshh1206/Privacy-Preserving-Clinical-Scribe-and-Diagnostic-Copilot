@@ -166,6 +166,11 @@ class ClinicalCondition(CamelModel):
     name: str = Field(min_length=1, max_length=200)
     status: Literal["active", "reported", "resolved", "unknown"] = "reported"
     verification: Literal["confirmed", "reported", "awaiting_review"] = "reported"
+    duration: Optional[str] = None
+    classification: Optional[str] = None
+    provenance: Optional[str] = None
+    source: Optional[str] = None
+    evidence: Optional[str] = None
     source_consultation_id: Optional[str] = None
 
 
@@ -173,8 +178,13 @@ class ClinicalMedication(CamelModel):
     name: str = Field(min_length=1, max_length=200)
     dose: Optional[str] = None
     frequency: Optional[str] = None
+    strength: Optional[str] = None
+    route: Optional[str] = None
     status: Literal["current", "reported_current", "discontinued", "unknown"] = "reported_current"
     verification: Literal["confirmed", "reported", "awaiting_review"] = "reported"
+    adherence: Optional[str] = None
+    source: Optional[str] = None
+    evidence: Optional[str] = None
     source_consultation_id: Optional[str] = None
 
 
@@ -191,6 +201,11 @@ class ClinicalMeasurement(CamelModel):
 class ClinicalAllergy(CamelModel):
     substance: str = Field(min_length=1, max_length=200)
     reaction: Optional[str] = None
+    category: Optional[Literal["drug", "food", "environmental", "unknown"]] = None
+    status: Optional[Literal["documented_allergies", "explicitly_no_known_allergies", "not_documented"]] = None
+    details: Optional[str] = None
+    source: Optional[str] = None
+    evidence: Optional[str] = None
     verification: Literal["confirmed", "reported", "awaiting_review"] = "reported"
     source_consultation_id: Optional[str] = None
 

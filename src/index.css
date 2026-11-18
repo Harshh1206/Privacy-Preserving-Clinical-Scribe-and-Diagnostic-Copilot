@@ -88,6 +88,9 @@
   .claim-supported { @apply bg-ok-100/10 border-l-2 border-ok-500; }
   .claim-unsupported { @apply bg-danger-100/10 border-l-2 border-danger-500; }
   .claim-conflict { @apply bg-warn-100/10 border-l-2 border-warn-500; }
+  .finding-disclosure > summary { list-style: none; }
+  .finding-disclosure > summary::-webkit-details-marker { display: none; }
+  .finding-disclosure[open] > summary .finding-chevron { transform: rotate(90deg); }
 
   /* Status indicator dots */
   .dot { @apply inline-block w-2 h-2 rounded-full; }

@@ -1017,25 +1017,47 @@ class Store:
             else:
                 display = f"{label} — {status}, {verification.replace('_', ' ')}"
             new_conditions.append(display)
+            detail_parts = []
+            if getattr(condition, "duration", None):
+                detail_parts.append(f"Duration: {condition.duration}")
+            if getattr(condition, "classification", None):
+                detail_parts.append(f"Classification: {condition.classification}")
             self._upsert_clinical_record(
                 db, patient, consultation, category="condition", name=label,
-                status=status, verification=verification,
+                status=status,
+                verification=verification,
+                value="; ".join(detail_parts) if detail_parts else None,
+                source=getattr(condition, "source", None) or "current_encounter",
             )
 
         for medication in clinical_data.medications:
             verification = medication.verification or "reported"
             status = medication.status or "reported_current"
-            parts = [medication.name.strip()]
+            name = medication.name.strip()
+            detail_parts = []
+            if getattr(medication, "strength", None) or medication.dose:
+                detail_parts.append((medication.strength or medication.dose).strip())
+            if medication.frequency:
+                detail_parts.append(medication.frequency.strip())
+            if getattr(medication, "route", None):
+                detail_parts.append(f"Route: {medication.route.strip()}")
+            if getattr(medication, "adherence", None):
+                detail_parts.append(f"Adherence: {medication.adherence.strip()}")
+            value = "; ".join(part for part in detail_parts if part)
+            parts = [name]
             if medication.dose:
                 parts.append(medication.dose.strip())
             if medication.frequency:
                 parts.append(medication.frequency.strip())
-            label = " ".join(parts)
+            label = " ".join(part for part in parts if part)
             display = f"{label} — {status.replace('_', ' ')}, {verification.replace('_', ' ')}"
             new_medications.append(display)
             self._upsert_clinical_record(
-                db, patient, consultation, category="medication", name=label,
-                status=status, verification=verification,
+                db, patient, consultation, category="medication", name=name,
+                status=status,
+                verification=verification,
+                value=value or None,
+                source=getattr(medication, "source", None) or "current_encounter",
             )
 
         for measurement in clinical_data.measurements:
@@ -1050,7 +1072,22 @@ class Store:
 
         for allergy in clinical_data.allergies:
             verification = allergy.verification or "reported"
+            status = allergy.status or "documented_allergies"
             label = allergy.substance.strip()
+            category = (allergy.category or "unknown").lower()
+            if status == "explicitly_no_known_allergies":
+                label = f"No known {category if category in {'food', 'drug', 'environmental'} else 'allergy'} allergies"
+                display = f"{label} — {status.replace('_', ' ')}, {verification.replace('_', ' ')}"
+                new_allergies.append(display)
+                self._upsert_clinical_record(
+                    db, patient, consultation, category="allergy", name=label,
+                    status=category if category in {"drug", "food", "environmental"} else "unknown",
+                    verification=verification,
+                    value="Explicitly no known allergies",
+                    source=getattr(allergy, "source", None) or "current_encounter",
+                    reaction=allergy.reaction,
+                )
+                continue
             if allergy.reaction:
                 display = f"{label} — {allergy.reaction.strip()} ({verification.replace('_', ' ')})"
             else:
@@ -1058,7 +1095,11 @@ class Store:
             new_allergies.append(display)
             self._upsert_clinical_record(
                 db, patient, consultation, category="allergy", name=label,
-                reaction=allergy.reaction, verification=verification,
+                status=category if category in {"drug", "food", "environmental"} else "unknown",
+                reaction=allergy.reaction,
+                verification=verification,
+                value=(allergy.details or (f"Status: {status.replace('_', ' ')}" if status else None)),
+                source=getattr(allergy, "source", None) or "current_encounter",
             )
 
         patient.conditions = self._merge_unique(patient.conditions or [], new_conditions)

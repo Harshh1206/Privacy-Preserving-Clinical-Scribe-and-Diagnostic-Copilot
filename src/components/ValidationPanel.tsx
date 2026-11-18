@@ -1,15 +1,45 @@
+import { useState } from 'react';
 import type { ValidationResult, Claim, Evidence } from '../models/types';
 import {
-  getGroundingColor, getGroundingBgColor, getHallucinationRiskLabel, getRiskBadgeClass,
-  getClaimStatusLabel, getClaimBadgeClass, getClaimRowClass, getSectionLabel, getSeverityBadgeClass,
+  getFindingStatus, getFindingStatusPresentation, getGroundingColor, getGroundingBgColor,
+  getHallucinationRiskLabel, getRiskBadgeClass,
 } from '../utils/format';
+import type { FindingStatus } from '../utils/format';
+import type { Patient } from '../models/types';
+import PatientClinicalSummary from './PatientClinicalSummary';
 
 interface ValidationPanelProps {
   validation: ValidationResult;
+  patient: Patient;
+  consultationId: string;
   onClaimSelect: (claim: Claim, evidence: Evidence[]) => void;
+  onJumpToTranscript?: (entryId: string) => void;
   selectedClaimId?: string | null;
   loading?: boolean;
 }
+
+type FindingGroupId = FindingStatus;
+
+interface FindingGroup {
+  id: FindingGroupId;
+  title: string;
+  claims: Claim[];
+}
+
+const SECTION_NAMES: Record<Claim['soapSection'], string> = {
+  subjective: 'Subjective',
+  objective: 'Objective',
+  assessment: 'Assessment',
+  plan: 'Plan',
+};
+
+const GROUPS: Array<Pick<FindingGroup, 'id' | 'title'>> = [
+  { id: 'unsupported', title: 'Unsupported claims' },
+  { id: 'conflict', title: 'Conflicting claims' },
+  { id: 'needs-review', title: 'Needs clinician review' },
+  { id: 'not-assessed', title: 'Not assessed / missing information' },
+  { id: 'supported', title: 'Supported claims' },
+];
 
 function IconRefresh() {
   return (
@@ -28,6 +58,80 @@ function IconInfo() {
       <line x1="12" y1="8" x2="12.01" y2="8"/>
     </svg>
   );
+}
+
+function IconChevron({ className = '' }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="9 18 15 12 9 6"/>
+    </svg>
+  );
+}
+
+function getFindingGuidance(
+  claim: Claim,
+  groupId: FindingGroupId,
+): { explanation: string; action?: string } {
+  if (groupId === 'conflict') {
+    return {
+      explanation: claim.conflictDescription ?? 'The validation result marks this claim as conflicting with the encounter record.',
+      action: /\b(?:patient|medical|health) record\b/i.test(claim.conflictDescription ?? '')
+        ? 'Reconcile the claim against the patient record with the clinician before finalizing.'
+        : 'Review the source value against the transcript before finalizing.',
+    };
+  }
+
+  if (groupId === 'not-assessed') {
+    const isFamilyHistory = /\bfamily history\b/i.test(claim.text);
+    const isExamination = /\b(?:exam|examination)\b/i.test(claim.text);
+    return {
+      explanation: 'This information is not documented or discussed; that is not the same as a negative finding.',
+      action: isFamilyHistory
+        ? 'Keep it as not documented; do not infer a negative family history.'
+        : isExamination
+          ? 'Keep the examination as not documented; do not infer a normal examination.'
+          : 'Leave it as not documented, and confirm with the clinician if needed.',
+    };
+  }
+
+  if (groupId === 'needs-review') {
+    return {
+      explanation: claim.status === 'pending'
+        ? 'The validation result does not establish a clear evidence relationship for this claim.'
+        : 'The linked transcript match is inferred and may need confirmation in context.',
+      action: 'Review the transcript evidence and confirm the claim with the clinician.',
+    };
+  }
+
+  if (groupId === 'unsupported') {
+    if (/\b(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|several|few|couple(?:\s+of)?)\s*[- ]?\s*(?:days?|weeks?|months?|years?)\b|\b(?:duration|for the past)\b/i.test(claim.text)) {
+      return {
+        explanation: 'The transcript does not establish this duration.',
+        action: 'Remove it or confirm it with the clinician.',
+      };
+    }
+
+    if (claim.soapSection === 'assessment') {
+      return {
+        explanation: 'No supporting evidence for this assessment was found in the encounter transcript.',
+        action: 'Verify against the patient record before retaining.',
+      };
+    }
+
+    if (claim.soapSection === 'objective' && /\d/.test(claim.text)) {
+      return {
+        explanation: 'The transcript does not confirm this documented value.',
+        action: 'Review the source value before finalizing.',
+      };
+    }
+
+    return {
+      explanation: 'No supporting evidence for this assertion was found in the encounter transcript.',
+      action: 'Confirm it with the clinician or source record before retaining.',
+    };
+  }
+
+  return { explanation: 'Linked transcript evidence supports this claim.' };
 }
 
 // ─── Grounding Score widget ───────────────────────────────────────────────────
@@ -73,57 +177,131 @@ function GroundingScore({ score, risk }: { score: number; risk: ValidationResult
   );
 }
 
-// ─── Claim row ────────────────────────────────────────────────────────────────
+// ─── Claim finding ────────────────────────────────────────────────────────────
 
-function ClaimRow({
+function ClaimFinding({
   claim,
+  groupId,
   evidenceList,
   isSelected,
-  onClick,
+  onClaimSelect,
+  onJumpToTranscript,
 }: {
   claim: Claim;
+  groupId: FindingGroupId;
   evidenceList: Evidence[];
   isSelected: boolean;
-  onClick: () => void;
+  onClaimSelect: (claim: Claim, evidence: Evidence[]) => void;
+  onJumpToTranscript?: (entryId: string) => void;
 }) {
+  const status = getFindingStatusPresentation(groupId);
+  const guidance = getFindingGuidance(claim, groupId);
+
   return (
-    <div
-      onClick={onClick}
-      className={`px-3 py-2.5 cursor-pointer transition-colors border-b border-slate-800 last:border-0 ${
-        getClaimRowClass(claim.status)
-      } ${isSelected ? 'ring-1 ring-inset ring-brand-500/50' : 'hover:bg-slate-800/40'}`}
-    >
-      <div className="flex items-start gap-2">
-        <span className="mt-0.5 inline-flex items-center justify-center w-4 h-4 rounded bg-slate-700 text-2xs font-bold text-slate-300 shrink-0">
-          {getSectionLabel(claim.soapSection)}
-        </span>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm text-slate-200 leading-snug">{claim.text}</p>
-          {claim.conflictDescription && (
-            <p className="mt-1 text-xs text-warn-300 leading-snug">{claim.conflictDescription}</p>
-          )}
-          {claim.suggestedCorrection && (
-            <p className="mt-1 text-xs text-brand-300 leading-snug">
-              <span className="font-medium">Suggestion: </span>{claim.suggestedCorrection}
-            </p>
-          )}
-          <div className="flex items-center gap-2 mt-1.5">
-            <span className={getClaimBadgeClass(claim.status)}>{getClaimStatusLabel(claim.status)}</span>
-            <span className={getSeverityBadgeClass(claim.severity)}>{claim.severity}</span>
-            {claim.status !== 'unsupported' && evidenceList.length > 0 && (
-              <span className="text-2xs text-slate-500">{evidenceList.length} evidence item{evidenceList.length > 1 ? 's' : ''}</span>
+    <details className={`finding-disclosure border-b border-slate-800/80 last:border-0 ${isSelected ? 'bg-brand-500/[0.04]' : ''}`}>
+      <summary
+        className="flex cursor-pointer items-start gap-2.5 px-3 py-2.5 transition-colors hover:bg-slate-800/40 focus-visible:outline focus-visible:outline-1 focus-visible:outline-brand-500"
+        onClick={() => onClaimSelect(claim, evidenceList)}
+      >
+        <IconChevron className="finding-chevron mt-0.5 shrink-0 text-slate-500 transition-transform" />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm leading-snug text-slate-200">{claim.text}</p>
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="text-2xs text-slate-500">{SECTION_NAMES[claim.soapSection]}</span>
+            <span className={`rounded px-1.5 py-0.5 text-2xs font-medium ${status.className}`}>{status.label}</span>
+            {evidenceList.length > 0 && (
+              <span className="text-2xs text-slate-500">
+                {evidenceList.length} transcript excerpt{evidenceList.length === 1 ? '' : 's'}
+              </span>
             )}
           </div>
         </div>
+      </summary>
+
+      <div className="px-3 pb-3 pl-9">
+        <div className="rounded-md bg-slate-950/70 px-3 py-2.5">
+          <p className="text-xs leading-relaxed text-slate-300">{guidance.explanation}</p>
+          {guidance.action && (
+            <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
+              <span className="font-medium text-slate-300">Recommended action: </span>{guidance.action}
+            </p>
+          )}
+        </div>
+
+        <div className="mt-3">
+          <p className="mb-1.5 text-2xs font-semibold uppercase tracking-wider text-slate-500">Transcript evidence</p>
+          <div className="mb-2 rounded-md border-l-2 border-slate-700 bg-slate-950/60 px-3 py-2">
+            <p className="text-2xs font-medium uppercase tracking-wide text-slate-500">Claim evaluated · {SECTION_NAMES[claim.soapSection]}</p>
+            <p className="mt-1 text-xs leading-relaxed text-slate-300">{claim.text}</p>
+          </div>
+          {evidenceList.length === 0 ? (
+            <p className="text-xs text-slate-500">No transcript quotation is linked to this claim.</p>
+          ) : (
+            <div className="space-y-2">
+              {evidenceList.map(evidence => (
+                <blockquote key={evidence.id} className="rounded-md border-l-2 border-brand-500/50 bg-slate-950/60 px-3 py-2">
+                  <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2 text-2xs text-slate-500">
+                    <span>{evidence.speaker} · {evidence.timestamp}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="capitalize">{evidence.matchType} match</span>
+                      {onJumpToTranscript && (
+                        <button
+                          type="button"
+                          className="text-brand-400 transition-colors hover:text-brand-300"
+                          onClick={event => {
+                            event.stopPropagation();
+                            onClaimSelect(claim, evidenceList);
+                            onJumpToTranscript(evidence.transcriptEntryId);
+                          }}
+                        >
+                          Jump to transcript
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <p className="text-sm leading-relaxed text-slate-300">“{evidence.transcriptText}”</p>
+                </blockquote>
+              ))}
+            </div>
+          )}
+          <button
+            type="button"
+            className="mt-2 text-2xs text-slate-400 transition-colors hover:text-brand-300"
+            onClick={event => {
+              event.stopPropagation();
+              onClaimSelect(claim, evidenceList);
+            }}
+          >
+            View in evidence panel
+          </button>
+        </div>
       </div>
-    </div>
+    </details>
   );
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function ValidationPanel({ validation, onClaimSelect, selectedClaimId, loading }: ValidationPanelProps) {
+export default function ValidationPanel({
+  validation,
+  patient,
+  consultationId,
+  onClaimSelect,
+  onJumpToTranscript,
+  selectedClaimId,
+  loading,
+}: ValidationPanelProps) {
+  const [expandedGroups, setExpandedGroups] = useState<Set<FindingGroupId>>(
+    () => new Set(['unsupported', 'conflict', 'needs-review', 'not-assessed']),
+  );
   const evidenceMap = Object.fromEntries(validation.evidence.map(e => [e.id, e]));
+  const findings = GROUPS.map(group => ({
+    ...group,
+    claims: validation.claims.filter(claim => {
+      const evidenceList = claim.evidenceIds.map(id => evidenceMap[id]).filter((evidence): evidence is Evidence => Boolean(evidence));
+      return getFindingStatus(claim, evidenceList) === group.id;
+    }),
+  })).filter(group => group.claims.length > 0);
 
   if (loading) {
     return (
@@ -163,46 +341,64 @@ export default function ValidationPanel({ validation, onClaimSelect, selectedCla
         </div>
       )}
 
+      {validation.validationNotes && (
+        <div className="px-3 py-2 bg-slate-950 border-b border-slate-800 text-xs text-slate-400">
+          {validation.validationNotes}
+        </div>
+      )}
+
       {/* Claims list */}
       <div className="flex-1 overflow-auto">
         <div className="px-3 py-2 border-b border-slate-800">
           <p className="text-2xs text-slate-500 uppercase tracking-wider font-semibold">
-            Claims ({validation.totalClaimCount}) · click to view evidence
+            Claims ({validation.totalClaimCount}) · select a claim to view evidence
           </p>
         </div>
 
-        {/* Critical conflicts first */}
-        {validation.claims.filter(c => c.status === 'conflict').map(claim => (
-          <ClaimRow
-            key={claim.id}
-            claim={claim}
-            evidenceList={claim.evidenceIds.map(eid => evidenceMap[eid]).filter(Boolean)}
-            isSelected={claim.id === selectedClaimId}
-            onClick={() => onClaimSelect(claim, claim.evidenceIds.map(eid => evidenceMap[eid]).filter(Boolean))}
-          />
-        ))}
+        {findings.map(group => {
+          const isExpanded = expandedGroups.has(group.id);
+          return (
+            <section key={group.id} className="border-b border-slate-800">
+              <button
+                type="button"
+                aria-expanded={isExpanded}
+                onClick={() => setExpandedGroups(current => {
+                  const next = new Set(current);
+                  if (next.has(group.id)) next.delete(group.id);
+                  else next.add(group.id);
+                  return next;
+                })}
+                className="flex w-full items-center gap-2 bg-slate-950/80 px-3 py-2.5 text-left transition-colors hover:bg-slate-800/60 focus-visible:outline focus-visible:outline-1 focus-visible:outline-brand-500"
+              >
+                <IconChevron className={`shrink-0 text-slate-500 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                <span className="flex-1 text-xs font-semibold text-slate-300">{group.title}</span>
+                <span className="rounded-full bg-slate-800 px-2 py-0.5 text-2xs font-medium text-slate-400">{group.claims.length}</span>
+              </button>
+              {isExpanded && (
+                <div>
+                  {group.claims.map(claim => {
+                    const evidenceList = claim.evidenceIds
+                      .map(id => evidenceMap[id])
+                      .filter((evidence): evidence is Evidence => Boolean(evidence));
+                    return (
+                      <ClaimFinding
+                        key={claim.id}
+                        claim={claim}
+                        groupId={group.id}
+                        evidenceList={evidenceList}
+                        isSelected={claim.id === selectedClaimId}
+                        onClaimSelect={onClaimSelect}
+                        onJumpToTranscript={onJumpToTranscript}
+                      />
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          );
+        })}
 
-        {/* Unsupported */}
-        {validation.claims.filter(c => c.status === 'unsupported').map(claim => (
-          <ClaimRow
-            key={claim.id}
-            claim={claim}
-            evidenceList={[]}
-            isSelected={claim.id === selectedClaimId}
-            onClick={() => onClaimSelect(claim, [])}
-          />
-        ))}
-
-        {/* Supported */}
-        {validation.claims.filter(c => c.status === 'supported').map(claim => (
-          <ClaimRow
-            key={claim.id}
-            claim={claim}
-            evidenceList={claim.evidenceIds.map(eid => evidenceMap[eid]).filter(Boolean)}
-            isSelected={claim.id === selectedClaimId}
-            onClick={() => onClaimSelect(claim, claim.evidenceIds.map(eid => evidenceMap[eid]).filter(Boolean))}
-          />
-        ))}
+        <PatientClinicalSummary patient={patient} consultationId={consultationId} />
       </div>
 
       {/* Footer */}
